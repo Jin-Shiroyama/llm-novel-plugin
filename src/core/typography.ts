@@ -70,21 +70,32 @@ const NO_SPACE_BEFORE = new Set(["！", "？", "!", "?", "…", "―", "、", "�
 const KATAKANA = /[ァ-ヺー]/
 const JAPANESE = /[぀-ヿ㐀-鿿豈-﫿々〆ヶ]/
 const ASCII_ALNUM = /[A-Za-z0-9]/
-const BOX_FRAME_CHAR = /[\u2502-\u257F]/
+const DIGIT_CHAR = /[0-9０-９〇零一二三四五六七八九十百千]/
+const BOX_FRAME_CHAR = /[\u2501-\u257F]/
 const BOX_DRAWING_ONLY = /^[\u2500-\u257F\s　]+$/
+const BOX_DECORATED_HEADING = /^─{2,}[\s　]+.+[\s　]+─{2,}$/
+// URL パス部は ASCII の URL 許容文字のみに限定し、直後に続く日本語や文末約物を巻き込まない
 const URL_PATTERN =
-  /(?:https?:\/\/[^\s　「」『』（）()<>＜＞【】]+)|(?:(?<![A-Za-z0-9._-])(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}(?:\/[^\s　「」『』（）()<>＜＞【】]*)?)/g
+  /(?:https?:\/\/[A-Za-z0-9\-._~:/?#[\]@!$&'*+,;=%]+)|(?:(?<![A-Za-z0-9._-])(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}(?:\/[A-Za-z0-9\-._~:/?#[\]@!$&'*+,;=%]*)?)/g
+const URL_TRAILING_PUNCT = /[.!?,;:]+$/
 
 const SEPARATOR_LINE = /^[\s　]*[＊*◇◆□■○●※・〜~\-－―]+(?:[\s　]*[＊*◇◆□■○●※・〜~\-－―]+)*[\s　]*$/
 
-/** 罫線で囲んだステータス画面・枠・罫線区切りの行か（ダッシュ代用「──それで」とは区別する） */
+/** 罫線で囲んだステータス画面・枠・飾り見出し・罫線区切りの行か（ダッシュ代用「──それで」とは区別する） */
 export function isBoxDrawingLine(line: string): boolean {
-  const trimmed = line.replace(/^[\s　]+/, "")
+  const trimmed = line.replace(/^[\s　]+/, "").replace(/[\s　]+$/, "")
   if (trimmed.length === 0) return false
   const first = [...trimmed][0]
   if (BOX_FRAME_CHAR.test(first)) return true
   if (BOX_DRAWING_ONLY.test(trimmed)) return true
+  if (BOX_DECORATED_HEADING.test(trimmed)) return true
   return false
+}
+
+/** 単独の en-dash（–）が数字に挟まれた範囲表記（「第1–3層」「2020–2026」等）か */
+function isNumericRangeDash(chars: string[], start: number, end: number): boolean {
+  if (end - start !== 1 || chars[start] !== "–") return false
+  return start > 0 && end < chars.length && DIGIT_CHAR.test(chars[start - 1]) && DIGIT_CHAR.test(chars[end])
 }
 
 /** 行内の URL 範囲をコードポイント単位の真偽配列で返す（URL 内の ? ! . 等を誤検出・誤整形しないため） */
@@ -104,7 +115,9 @@ function buildUrlMask(chars: string[]): boolean[] {
   URL_PATTERN.lastIndex = 0
   for (const m of text.matchAll(URL_PATTERN)) {
     const startOff = m.index ?? 0
-    const endOff = startOff + m[0].length
+    const trimmedMatch = m[0].replace(URL_TRAILING_PUNCT, "")
+    if (trimmedMatch.length === 0) continue
+    const endOff = startOff + trimmedMatch.length
     const startCp = offsetToCp.get(startOff)
     const endCp = offsetToCp.get(endOff)
     if (startCp === undefined || endCp === undefined) continue
@@ -263,7 +276,7 @@ function checkLine(
       const adjacentBoxFrame =
         ch === "─" &&
         ((i > 0 && BOX_FRAME_CHAR.test(chars[i - 1])) || (j < chars.length && BOX_FRAME_CHAR.test(chars[j])))
-      if (!adjacentBoxFrame) {
+      if (!adjacentBoxFrame && !isNumericRangeDash(chars, i, j)) {
         add(i, "dash", "error", `ダッシュは「――」（U+2015）を使う（「${ch}」は使わない）`)
       }
       i = j
@@ -586,7 +599,12 @@ function fixLine(
       const adjacentBoxFrame =
         ch === "─" &&
         ((i > 0 && BOX_FRAME_CHAR.test(tokens[i - 1].char)) || (j < tokens.length && BOX_FRAME_CHAR.test(tokens[j].char)))
-      if (adjacentBoxFrame) {
+      const numericRange = isNumericRangeDash(
+        tokens.map((t) => t.char),
+        i,
+        j,
+      )
+      if (adjacentBoxFrame || numericRange) {
         i = j
         continue
       }
@@ -768,15 +786,32 @@ export function formatFixSummary(fixes: TypographyFixSummary[]): string {
   return fixes.map(({ rule, count }) => `${TYPOGRAPHY_RULE_LABELS[rule]} ${count}`).join("、")
 }
 
-/** 変更された行の前後スニペットを最大 maxLines 行まで整形する（□ は全角スペース） */
+/** 変更された行の前後スニペットを最大 maxLines 行まで整形する（□ は全角スペース。最初の差分位置を中心に切り出す） */
 export function formatFixChanges(changes: TypographyFixChange[], maxLines = 5): string {
   if (changes.length === 0) return ""
-  const clip = (s: string) => {
-    const shown = s.replace(/　/g, "□")
-    const chars = [...shown]
-    return chars.length > 44 ? chars.slice(0, 44).join("") + "…" : shown
+  const maxWidth = 44
+  const formatPair = (beforeRaw: string, afterRaw: string): [string, string] => {
+    const bChars = [...beforeRaw.replace(/　/g, "□")]
+    const aChars = [...afterRaw.replace(/　/g, "□")]
+    if (bChars.length <= maxWidth && aChars.length <= maxWidth) {
+      return [bChars.join(""), aChars.join("")]
+    }
+    let diff = 0
+    const minLen = Math.min(bChars.length, aChars.length)
+    while (diff < minLen && bChars[diff] === aChars[diff]) diff++
+    const sliceAround = (chars: string[]): string => {
+      if (chars.length <= maxWidth) return chars.join("")
+      const lead = 14
+      const start = Math.max(0, Math.min(diff - lead, chars.length - maxWidth))
+      const end = Math.min(chars.length, start + maxWidth)
+      return `${start > 0 ? "…" : ""}${chars.slice(start, end).join("")}${end < chars.length ? "…" : ""}`
+    }
+    return [sliceAround(bChars), sliceAround(aChars)]
   }
-  const lines = changes.slice(0, maxLines).map((c) => `  - ${c.line}行目: ${clip(c.before)} → ${clip(c.after)}`)
+  const lines = changes.slice(0, maxLines).map((c) => {
+    const [b, a] = formatPair(c.before, c.after)
+    return `  - ${c.line}行目: ${b} → ${a}`
+  })
   if (changes.length > maxLines) lines.push(`  …ほか${changes.length - maxLines}行`)
   return lines.join("\n") + "\n"
 }

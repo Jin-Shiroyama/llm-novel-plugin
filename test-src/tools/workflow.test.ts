@@ -1,6 +1,6 @@
 import { test, describe } from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs"
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { novelInitExecute } from "../../src/tools/init.js"
@@ -191,6 +191,12 @@ describe("E2E ワークフロー: ジャンル別（ラブコメ／ファンタ�
     assert.ok(saveOut.includes("少なめ"))
     const savedFile = readFileSync(join(dir, ".novel/chapters/chapter-001.md"), "utf-8")
     assert.ok(savedFile.includes("「行こう」\n　廊下を歩いた！　3メートル先だ。"))
+    // 同じ内容を繰り返し保存しても before-fix の控えが重複生成されない
+    const repeatOut = await novelSaveChapterExecute({ chapterNumber: 1, title: "テスト", content: dirtyBody }, ctx)
+    assert.ok(repeatOut.includes("前に保存した内容と同じでした"))
+    assert.ok(!repeatOut.includes("整形前の本文を残しました"))
+    const beforeFixDrafts = readdirSync(join(dir, ".novel/drafts")).filter((f) => f.includes("before-fix"))
+    assert.equal(beforeFixDrafts.length, 1)
 
     // autoFix: false で未整形のまま保存したあと、novel_check(fix: true) で自動修正＋旧稿退避できる
     const unfixedOut = await novelSaveChapterExecute(

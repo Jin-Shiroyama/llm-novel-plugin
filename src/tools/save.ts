@@ -68,6 +68,7 @@ export async function novelSaveChapterExecute(
   const saved = header + body
 
   let previousNote = ""
+  let sameAsPrevious = false
   if (existsSync(filePath)) {
     const previous = await safeReadFile(filePath)
     if (previous === null) {
@@ -75,6 +76,7 @@ export async function novelSaveChapterExecute(
    ファイルの権限や中身（ディレクトリになっていないか）を確かめてください。`
     }
     if (previous === saved) {
+      sameAsPrevious = true
       previousNote = `ℹ️ 前に保存した内容と同じでした\n`
     } else {
       const backupPath = await backupPreviousDraft(dir, fileName, previous)
@@ -82,7 +84,7 @@ export async function novelSaveChapterExecute(
     }
   }
   let rawBackupPath: string | null = null
-  if (fixResult && fixResult.totalFixes > 0 && body !== rawBody) {
+  if (fixResult && fixResult.totalFixes > 0 && body !== rawBody && !sameAsPrevious) {
     rawBackupPath = await backupPreviousDraft(
       dir,
       `${fileName.replace(/\.md$/, "")}-before-fix.md`,

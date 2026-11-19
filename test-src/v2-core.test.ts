@@ -14,7 +14,7 @@ import {
   chapterTitleFromHeading,
 } from "../src/core/utils.js"
 import type { NovelConfig } from "../src/core/utils.js"
-import { checkTypography, fixTypography } from "../src/core/typography.js"
+import { checkTypography, fixTypography, formatFixChanges } from "../src/core/typography.js"
 import { checkProse } from "../src/core/prose.js"
 import { conceptParts, worldBuildingParts } from "../src/core/doc-sections.js"
 import { CONCEPT_TEMPLATE, WORLD_BUILDING_TEMPLATE } from "../src/core/templates.js"
@@ -229,16 +229,19 @@ describe("表記の点検（typography）: 字下げ設定と特殊書式", () =
     assert.deepEqual(second.changes, [])
   })
 
-  test("fixTypography は特殊書式（罫線ステータス・通知・配信・記号・URL）と確認どまり（⚠️）を書き換えない", () => {
+  test("fixTypography は特殊書式（罫線ステータス・飾り見出し・通知・配信・記号・URL・数値範囲）と確認どまり（⚠️）を書き換えない", () => {
     const special = [
       "┌────────┐",
       "│ 名前：ミナト │",
       "│ HP：120／120 │",
       "└────────┘",
+      "━━━━ ステータス ━━━━",
+      "── 第1部 ──",
       "",
       "＜レベルが上がりました！＞",
       "＞すげえ！ｗ",
       "「好き！♡」",
+      "　第1–3層を攻略した。",
       "　詳細はこちら https://example.com/?q=1&a=2 と example.com/?page=3 を確認した。",
       "　彼は Hello World と言った。",
       "　　詩の1行目。",
@@ -251,6 +254,35 @@ describe("表記の点検（typography）: 字下げ設定と特殊書式", () =
     // 点検でもエラー（❌）は 0 件（Hello World の ascii-space と 2字字下げは ⚠️ のみ）
     const errors = checkTypography(special, { indent: "fullwidth" }).filter((i) => i.severity === "error")
     assert.deepEqual(errors, [])
+  })
+
+  test("URL の直後に日本語が続いていても URL 本体だけを保護し、後ろの日本語・約物は正しく整形する", () => {
+    const src = [
+      "　example.com/newsです!すごい!",
+      "「サイトはexample.com/topだよ。」",
+    ].join("\n")
+    const res = fixTypography(src, { indent: "fullwidth" })
+    assert.equal(
+      res.text,
+      [
+        "　example.com/newsです！　すごい！",
+        "「サイトはexample.com/topだよ」",
+      ].join("\n"),
+    )
+    assert.deepEqual(
+      checkTypography(res.text, { indent: "fullwidth" }).filter((i) => i.severity === "error"),
+      [],
+    )
+  })
+
+  test("formatFixChanges は長い行の行末付近の修正でも差分位置を中心に切り出して前後を区別できる", () => {
+    const longBefore = "「この長い会話文はずっと続いていて、四十文字を優に超えたあたりの最後の最後にだけ句点がある。」"
+    const res = fixTypography(longBefore, { indent: "fullwidth" })
+    const summary = formatFixChanges(res.changes)
+    const [left, right] = summary.trim().replace(/^-\s*\d+行目:\s*/, "").split(" → ")
+    assert.notEqual(left, right)
+    assert.ok(left.includes("。」"))
+    assert.ok(right.endsWith("」") && !right.endsWith("。」"))
   })
 
   test("あらすじの「全体の流れ（第N話まで）」を受理し、旧形式へ誤移送しない", () => {
