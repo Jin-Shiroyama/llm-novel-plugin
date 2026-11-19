@@ -12,7 +12,7 @@ import {
   chapterTitleFromHeading,
 } from "../src/core/utils.js"
 import type { NovelConfig } from "../src/core/utils.js"
-import { checkTypography } from "../src/core/typography.js"
+import { checkTypography, fixTypography } from "../src/core/typography.js"
 import { checkProse } from "../src/core/prose.js"
 import { conceptParts, worldBuildingParts } from "../src/core/doc-sections.js"
 import { CONCEPT_TEMPLATE, WORLD_BUILDING_TEMPLATE } from "../src/core/templates.js"
@@ -142,6 +142,73 @@ describe("表記の点検（typography）: 字下げ設定と特殊書式", () =
       "白瀬：明日も卵焼きをお願いします",
     ].join("\n")
     assert.equal(checkTypography(text).length, 0)
+  })
+
+  test("fixTypography は機械修正可能な表記を自動整形し、ルビ・傍点や文意を壊さない", () => {
+    const dirty = [
+      "放課後の廊下は３メートル先に窓がある。",
+      "　「行こう。」",
+      "「本当か?彼はまだ HP1200 だ!」",
+      "「待て!　」「どこだ!?」",
+      "...　それで—どうなったんだ。",
+      "｜背負子《しょいこ》が軽い。",
+      "「｜行こう《いこう》。」",
+      "　｜彼女《かのじょ》!あ、漢字《かんじ》と《《絶対》》!",
+      "【ステータス】",
+      "名前：ミナト",
+      "＞草",
+      "◇",
+    ].join("\n")
+
+    const expected = [
+      "　放課後の廊下は3メートル先に窓がある。",
+      "「行こう」",
+      "「本当か？　彼はまだHP1200だ！」",
+      "「待て！」「どこだ！？」",
+      "……それで――どうなったんだ。",
+      "　｜背負子《しょいこ》が軽い。",
+      "「｜行こう《いこう》」",
+      "　｜彼女《かのじょ》！　あ、漢字《かんじ》と《《絶対》》！",
+      "【ステータス】",
+      "名前：ミナト",
+      "＞草",
+      "◇",
+    ].join("\n")
+
+    const res = fixTypography(dirty, { indent: "fullwidth" })
+    assert.equal(res.text, expected)
+    assert.ok(res.totalFixes > 0)
+    assert.deepEqual(checkTypography(res.text, { indent: "fullwidth" }), [])
+    // 冪等性
+    const second = fixTypography(res.text, { indent: "fullwidth" })
+    assert.equal(second.text, expected)
+    assert.equal(second.totalFixes, 0)
+  })
+
+  test("fixTypography は indent: none の字下げ除去に対応し、括弧崩れ・ルビ崩れ・長音符「ーー」には触らない", () => {
+    const src = [
+      "　放課後の教室だ。",
+      "「閉じていない会話",
+      "「うわーーっ!」",
+      "　｜閉じてない《ルビ",
+    ].join("\n")
+
+    const res = fixTypography(src, { indent: "none" })
+    assert.equal(
+      res.text,
+      [
+        "放課後の教室だ。",
+        "「閉じていない会話",
+        "「うわーーっ！」",
+        "｜閉じてない《ルビ",
+      ].join("\n"),
+    )
+    const remaining = checkTypography(res.text, { indent: "none" }).map((i) => i.rule)
+    assert.ok(remaining.includes("bracket"))
+    assert.ok(remaining.includes("dash"))
+    assert.ok(remaining.includes("ruby"))
+    assert.ok(!remaining.includes("indent"))
+    assert.ok(!remaining.includes("halfwidth-punctuation"))
   })
 })
 

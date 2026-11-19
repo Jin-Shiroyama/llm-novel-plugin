@@ -167,7 +167,8 @@ describe("novel_save_chapter と節", () => {
 
   test("表記の点検の案内は節を指す", async () => {
     const dir = makeProject({ "config.json": CONFIG })
-    const out = await novelSaveChapterExecute({ section: "interlude", chapterNumber: 1, title: "", content: "　あ!" }, ctx(dir))
+    // 自動修正できない違反（括弧の閉じ忘れ）を残したとき、節を指す案内が出る
+    const out = await novelSaveChapterExecute({ section: "interlude", chapterNumber: 1, title: "", content: "「閉じていない" }, ctx(dir))
     assert.match(out, /novel_check\(section: "interlude", chapterNumber: 1\)/)
   })
 })

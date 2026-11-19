@@ -3,8 +3,8 @@ import {
   safeReadFile,
   safeReadJson,
   safeWriteFile,
+  backupPreviousDraft,
   getChaptersDir,
-  getNovelDir,
   getConfigPath,
   countWords,
   stripChapterHeading,
@@ -19,7 +19,8 @@ import { sectionFromArgs, sectionFileName, sectionLabel, SECTION_NAMES } from ".
 import type { SectionKind } from "../core/sections.js"
 import { summarizeForSave, summarizeProseForSave } from "./check.js"
 import { readGlossaryCheck } from "../core/glossary.js"
-import { DEFAULTS } from "../core/constants.js"
+import { fixTypography, formatFixSummary } from "../core/typography.js"
+import { DEFAULTS, CHAPTER_WORD_TOLERANCE } from "../core/constants.js"
 import type { ToolRuntimeContext } from "./types.js"
 
 export interface SaveChapterArgs {
@@ -29,6 +30,8 @@ export interface SaveChapterArgs {
   title: string
   content: string
   updateState?: boolean
+  /** 機械的に直せる表記を保存時に自動整形するかどうか。既定 true */
+  autoFix?: boolean
 }
 
 export async function novelSaveChapterExecute(
@@ -41,6 +44,7 @@ export async function novelSaveChapterExecute(
   const section = resolved.section
   const config = await safeReadJson<NovelConfig>(getConfigPath(dir))
   const unit = config?.chapterUnit ?? DEFAULTS.chapterUnit
+  const indent = indentStyleOf(config)
   const singleBody =
     isShortForm(config) && (config?.chapterCount ?? 1) === 1 && section.kind === "chapter" && section.chapter === 1
   const label = singleBody
@@ -52,7 +56,10 @@ export async function novelSaveChapterExecute(
   const chaptersDir = getChaptersDir(dir)
   const filePath = join(chaptersDir, fileName)
 
-  const body = stripChapterHeading(args.content)
+  const rawBody = stripChapterHeading(args.content)
+  const autoFix = args.autoFix !== false
+  const fixResult = autoFix ? fixTypography(rawBody, { indent }) : null
+  const body = fixResult ? fixResult.text : rawBody
   const title = normalizeChapterTitle(args.title)
 
   // 保存ファイル内部の見出しは算用数字の「第N章」で統一（書き出し時に chapterUnit で「第N話」等へ変換）
@@ -89,8 +96,11 @@ export async function novelSaveChapterExecute(
   if (section.kind === "interlude" && !existsSync(join(chaptersDir, chapterFileName(section.chapter)))) {
     report += `⚠️ 第${section.chapter}${unit}の本文はまだありません（この幕間は第${section.chapter}${unit}のあとに置かれます）\n`
   }
-  report += `📊 文字数: ${wordCount.toLocaleString("ja-JP")}文字\n`
-  report += summarizeForSave(saved, section, undefined, indentStyleOf(config), await readGlossaryCheck(dir))
+  report += formatWordCountLine(wordCount, section, unit, config)
+  if (fixResult && fixResult.totalFixes > 0) {
+    report += `✨ 表記を自動整形しました（${fixResult.totalFixes}件: ${formatFixSummary(fixResult.fixes)}）\n`
+  }
+  report += summarizeForSave(saved, section, undefined, indent, await readGlossaryCheck(dir))
   report += summarizeProseForSave(saved, section)
 
   if (args.updateState !== false) {
@@ -103,15 +113,32 @@ export async function novelSaveChapterExecute(
   return report
 }
 
-async function backupPreviousDraft(dir: string, fileName: string, content: string): Promise<string> {
-  const now = new Date()
-  const pad = (n: number) => String(n).padStart(2, "0")
-  const stamp =
-    `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-` +
-    `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
-  const base = join(getNovelDir(dir), "drafts", `${fileName.replace(/\.md$/, "")}-${stamp}`)
-  let path = `${base}.md`
-  for (let n = 2; existsSync(path); n++) path = `${base}-${n}.md`
-  await safeWriteFile(path, content)
-  return path
+function formatWordCountLine(
+  wordCount: number,
+  section: { kind: SectionKind },
+  unit: string,
+  config: NovelConfig | null,
+): string {
+  const formatted = wordCount.toLocaleString("ja-JP")
+  if (!config) return `📊 文字数: ${formatted}文字\n`
+  const targetWords = config.targetWords ?? DEFAULTS.targetWords
+  const chapterCount = Math.max(1, config.chapterCount ?? DEFAULTS.chapterCount)
+  if (!(Number.isFinite(targetWords) && targetWords > 0)) {
+    return `📊 文字数: ${formatted}文字\n`
+  }
+  const perChapter = Math.round(targetWords / chapterCount)
+  if (section.kind !== "chapter") {
+    return `📊 文字数: ${formatted}文字（プロットに従う。1${unit}の目安は ${perChapter.toLocaleString("ja-JP")}文字）\n`
+  }
+  const tolerancePct = Math.round(CHAPTER_WORD_TOLERANCE * 100)
+  const min = Math.round(perChapter * (1 - CHAPTER_WORD_TOLERANCE))
+  const max = Math.round(perChapter * (1 + CHAPTER_WORD_TOLERANCE))
+  const range = `${min.toLocaleString("ja-JP")}〜${max.toLocaleString("ja-JP")}文字`
+  const status =
+    wordCount < min
+      ? `⚠️ 目安より${(min - wordCount).toLocaleString("ja-JP")}文字少なめ`
+      : wordCount > max
+        ? `⚠️ 目安より${(wordCount - max).toLocaleString("ja-JP")}文字多め`
+        : "目安の範囲内"
+  return `📊 文字数: ${formatted}文字（目安 ${perChapter.toLocaleString("ja-JP")}文字 ±${tolerancePct}%［${range}］: ${status}）\n`
 }

@@ -383,3 +383,314 @@ export function formatIssue(issue: TypographyIssue): string {
   const mark = issue.severity === "error" ? "❌" : "⚠️"
   return `${mark} ${issue.line}行${issue.column}字目［${TYPOGRAPHY_RULE_LABELS[issue.rule]}］${issue.message}\n     ${issue.excerpt}`
 }
+
+// ============================================================
+// 安全な自動整形（fixTypography）
+// ============================================================
+
+export interface TypographyFixSummary {
+  rule: TypographyRule
+  count: number
+}
+
+export interface FixTypographyResult {
+  text: string
+  /** 自動修正した総件数（0 なら変更なし） */
+  totalFixes: number
+  /** 規則ごとの修正件数（件数の多い順） */
+  fixes: TypographyFixSummary[]
+}
+
+interface LineToken {
+  prefix: string
+  char: string
+  suffix: string
+}
+
+const isPlainToken = (t: LineToken) => t.prefix.length === 0 && t.suffix.length === 0
+const plainToken = (char: string): LineToken => ({ prefix: "", char, suffix: "" })
+const ALT_DASHES = new Set(["—", "─", "–"])
+
+/**
+ * 1行を「表示文字＋元のルビ・傍点マーク」のトークン列へ分解する。
+ * ルビ記法の崩れ等で元行と完全一致復元できない場合は null を返し、その行を無修正で保護する。
+ */
+function tokenizeLine(line: string): LineToken[] | null {
+  const original = [...line]
+  const { segments } = parseRubyLine(line)
+  const tokens: LineToken[] = []
+  let cursor = 0
+
+  for (const seg of segments) {
+    if (seg.kind === "text") {
+      const segChars = [...seg.text]
+      for (let k = 0; k < segChars.length; k++) {
+        const col = seg.columns[k]
+        if (col < cursor) return null
+        const prefix = col > cursor ? original.slice(cursor, col).join("") : ""
+        tokens.push({ prefix, char: segChars[k], suffix: "" })
+        cursor = col + 1
+      }
+      continue
+    }
+    if (seg.kind === "ruby") {
+      const baseChars = [...seg.base]
+      if (baseChars.length === 0 || seg.baseStart < cursor) return null
+      const prefix = seg.baseStart > cursor ? original.slice(cursor, seg.baseStart).join("") : ""
+      const readingSuffix = `《${seg.reading}》`
+      for (let k = 0; k < baseChars.length; k++) {
+        tokens.push({
+          prefix: k === 0 ? prefix : "",
+          char: baseChars[k],
+          suffix: k === baseChars.length - 1 ? readingSuffix : "",
+        })
+      }
+      cursor = seg.baseStart + baseChars.length + [...readingSuffix].length
+      continue
+    }
+    const textChars = [...seg.text]
+    if (textChars.length === 0 || seg.textStart < cursor) return null
+    const openPrefix = original.slice(cursor, seg.textStart).join("")
+    const closeSuffix = "》》"
+    for (let k = 0; k < textChars.length; k++) {
+      tokens.push({
+        prefix: k === 0 ? openPrefix : "",
+        char: textChars[k],
+        suffix: k === textChars.length - 1 ? closeSuffix : "",
+      })
+    }
+    cursor = seg.textStart + textChars.length + 2
+  }
+
+  if (cursor !== original.length) return null
+  const reconstructed = tokens.map((t) => t.prefix + t.char + t.suffix).join("")
+  return reconstructed === line ? tokens : null
+}
+
+function fixLine(
+  line: string,
+  indent: IndentStyle,
+  counts: Map<TypographyRule, number>,
+): string {
+  if (line.trim().length === 0 || /^#/.test(line)) return line
+  const tokens = tokenizeLine(line)
+  if (!tokens) return line
+
+  const bump = (rule: TypographyRule, n = 1) => {
+    counts.set(rule, (counts.get(rule) ?? 0) + n)
+  }
+
+  // A. 会話文末の句点（「行こう。」→「行こう」）
+  for (let i = tokens.length - 1; i >= 1; i--) {
+    if (tokens[i].char === "」" && tokens[i - 1].char === "。" && isPlainToken(tokens[i - 1])) {
+      tokens.splice(i - 1, 1)
+      bump("dialogue-period")
+    }
+  }
+
+  // B-1. 代替の三点リーダ（... / ‥ / ・・）と代替ダッシュ（— / ─ / –）を正規化
+  for (let i = 0; i < tokens.length; ) {
+    const ch = tokens[i].char
+    if (
+      isPlainToken(tokens[i]) &&
+      (ch === "‥" ||
+        (ch === "・" && tokens[i + 1]?.char === "・" && isPlainToken(tokens[i + 1])) ||
+        (ch === "." &&
+          tokens[i + 1]?.char === "." &&
+          tokens[i + 2]?.char === "." &&
+          isPlainToken(tokens[i + 1]) &&
+          isPlainToken(tokens[i + 2])))
+    ) {
+      let j = i
+      while (j < tokens.length && tokens[j].char === ch && isPlainToken(tokens[j])) j++
+      const run = j - i
+      const targetLen = ch === "‥" ? (run % 2 === 0 ? run : run + 1) : Math.max(2, Math.ceil(run / 3) * 2)
+      const replacement = Array.from({ length: targetLen }, () => plainToken("…"))
+      tokens.splice(i, run, ...replacement)
+      bump("ellipsis")
+      i += targetLen
+      continue
+    }
+    if (isPlainToken(tokens[i]) && ALT_DASHES.has(ch)) {
+      let j = i
+      while (j < tokens.length && tokens[j].char === ch && isPlainToken(tokens[j])) j++
+      const run = j - i
+      const targetLen = run % 2 === 0 ? run : run + 1
+      const replacement = Array.from({ length: targetLen }, () => plainToken("―"))
+      tokens.splice(i, run, ...replacement)
+      bump("dash")
+      i += targetLen
+      continue
+    }
+    i++
+  }
+
+  // B-2. 三点リーダ・ダッシュの奇数個を偶数個にそろえる（長音符「ーー」は叫び声の誤変換防止のため対象外）
+  // C. 三点リーダ・ダッシュ直後の全角スペースを除去
+  for (let i = 0; i < tokens.length; ) {
+    const ch = tokens[i].char
+    if (ch === "…" || ch === "―") {
+      let j = i
+      while (j < tokens.length && tokens[j].char === ch) j++
+      const run = j - i
+      if (run % 2 === 1) {
+        tokens.splice(j, 0, plainToken(ch))
+        bump(ch === "…" ? "ellipsis" : "dash")
+        j++
+      }
+      if (j < tokens.length && tokens[j].char === "　" && isPlainToken(tokens[j])) {
+        let k = j
+        while (k < tokens.length && tokens[k].char === "　" && isPlainToken(tokens[k])) k++
+        tokens.splice(j, k - j)
+        bump("space-after-ellipsis-dash")
+      }
+      i = j
+      continue
+    }
+    i++
+  }
+
+  // D. 半角の ! ? を全角 ！ ？ に統一
+  for (const t of tokens) {
+    if (t.char === "!") {
+      t.char = "！"
+      bump("halfwidth-punctuation")
+    } else if (t.char === "?") {
+      t.char = "？"
+      bump("halfwidth-punctuation")
+    }
+  }
+
+  // E. 感嘆符・疑問符のあとの空白ルールを整形
+  for (let i = 0; i < tokens.length; ) {
+    const ch = tokens[i].char
+    if (ch === "！" || ch === "？") {
+      let j = i
+      while (j < tokens.length && (tokens[j].char === "！" || tokens[j].char === "？")) j++
+      const next = tokens[j]?.char
+      if (next !== undefined && !CLOSERS.has(next) && !FOLLOWING_PUNCTUATION.has(next)) {
+        if (next === "　" || next === " ") {
+          let k = j
+          while (k < tokens.length && (tokens[k].char === "　" || tokens[k].char === " ") && isPlainToken(tokens[k])) {
+            k++
+          }
+          const after = tokens[k]?.char
+          if (k > j) {
+            if (after === undefined || CLOSERS.has(after) || NO_SPACE_BEFORE.has(after)) {
+              tokens.splice(j, k - j)
+              bump("exclamation-space")
+            } else if (!(k - j === 1 && tokens[j].char === "　")) {
+              tokens.splice(j, k - j, plainToken("　"))
+              bump("exclamation-space")
+              j++
+            } else {
+              j = k
+            }
+          }
+        } else {
+          tokens.splice(j, 0, plainToken("　"))
+          bump("exclamation-space")
+          j++
+        }
+      }
+      i = j
+      continue
+    }
+    i++
+  }
+
+  // F. 全角の算用数字（０〜９）を半角へ
+  for (let i = 0; i < tokens.length; ) {
+    if (/[０-９]/.test(tokens[i].char)) {
+      while (i < tokens.length && /[０-９]/.test(tokens[i].char)) {
+        tokens[i].char = String.fromCharCode(tokens[i].char.charCodeAt(0) - 0xfee0)
+        i++
+      }
+      bump("fullwidth-digit")
+      continue
+    }
+    i++
+  }
+
+  // G. 日本語と英数字のあいだの半角スペースを除去
+  for (let i = tokens.length - 2; i >= 1; i--) {
+    if (tokens[i].char === " " && isPlainToken(tokens[i])) {
+      const before = tokens[i - 1].char
+      const after = tokens[i + 1].char
+      if ((JAPANESE.test(before) && ASCII_ALNUM.test(after)) || (ASCII_ALNUM.test(before) && JAPANESE.test(after))) {
+        tokens.splice(i, 1)
+        bump("ascii-space")
+      }
+    }
+  }
+
+  // H. 段落頭の字下げ（indent: fullwidth / none）
+  const visibleLine = tokens.map((t) => t.char).join("")
+  if (!SEPARATOR_LINE.test(visibleLine)) {
+    let leadEnd = 0
+    while (
+      leadEnd < tokens.length &&
+      (tokens[leadEnd].char === "　" || tokens[leadEnd].char === " " || tokens[leadEnd].char === "\t") &&
+      isPlainToken(tokens[leadEnd])
+    ) {
+      leadEnd++
+    }
+    const restLine = tokens.slice(leadEnd).map((t) => t.char).join("")
+    const first = tokens[leadEnd]?.char
+    const hasHalfOrTab = tokens.slice(0, leadEnd).some((t) => t.char === " " || t.char === "\t")
+    const noIndentLine =
+      first === undefined ||
+      first === "「" ||
+      first === "『" ||
+      first === "…" ||
+      first === "―" ||
+      indent === "none"
+
+    if (noIndentLine) {
+      if (leadEnd > 0) {
+        tokens.splice(0, leadEnd)
+        bump("indent")
+      }
+    } else {
+      const skipIndent = BLOCK_OPENERS.has(first) || LINE_MARKERS.has(first) || LABEL_LINE.test(restLine)
+      if (skipIndent) {
+        if (hasHalfOrTab || leadEnd > 1) {
+          tokens.splice(0, leadEnd)
+          bump("indent")
+        }
+      } else if (hasHalfOrTab || leadEnd === 0 || leadEnd > 1) {
+        tokens.splice(0, leadEnd, plainToken("　"))
+        bump("indent")
+      }
+    }
+  }
+
+  return tokens.map((t) => t.prefix + t.char + t.suffix).join("")
+}
+
+/**
+ * 機械的に安全に直せる表記規約違反（会話末の句点・半角!?・感嘆符空白・三点リーダ/ダッシュ・全角数字・字下げ・日英間半角空白）を自動整形する。
+ * 括弧の対応崩れ・ルビ記法ミス・長音符「ーー」・用語集の禁止表記は文意に関わるため変更しない。
+ */
+export function fixTypography(
+  text: string,
+  opts: { indent?: IndentStyle } = {},
+): FixTypographyResult {
+  const indent: IndentStyle = opts.indent ?? "fullwidth"
+  const counts = new Map<TypographyRule, number>()
+  const fixed = text
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => fixLine(line, indent, counts))
+    .join("\n")
+
+  const fixes: TypographyFixSummary[] = [...counts.entries()]
+    .map(([rule, count]) => ({ rule, count }))
+    .sort((a, b) => b.count - a.count)
+  const totalFixes = fixes.reduce((sum, f) => sum + f.count, 0)
+  return { text: fixed, totalFixes, fixes }
+}
+
+export function formatFixSummary(fixes: TypographyFixSummary[]): string {
+  return fixes.map(({ rule, count }) => `${TYPOGRAPHY_RULE_LABELS[rule]} ${count}`).join("、")
+}

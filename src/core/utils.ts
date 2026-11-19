@@ -132,6 +132,20 @@ export async function safeWriteFile(filePath: string, content: string): Promise<
   await writeFile(filePath, content, "utf-8")
 }
 
+/** 上書き保存の前に旧稿を .novel/drafts/ へ退避する */
+export async function backupPreviousDraft(dir: string, fileName: string, content: string): Promise<string> {
+  const now = new Date()
+  const pad = (n: number) => String(n).padStart(2, "0")
+  const stamp =
+    `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-` +
+    `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+  const base = join(getNovelDir(dir), "drafts", `${fileName.replace(/\.md$/, "")}-${stamp}`)
+  let path = `${base}.md`
+  for (let n = 2; existsSync(path); n++) path = `${base}-${n}.md`
+  await safeWriteFile(path, content)
+  return path
+}
+
 /** JSON ファイルを読む。存在しないか壊れていれば null を返す */
 export async function safeReadJson<T>(filePath: string): Promise<T | null> {
   const content = await safeReadFile(filePath)

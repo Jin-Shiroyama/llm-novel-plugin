@@ -29,9 +29,9 @@ agent: novel-planner
 ```
 第{N}話を書いてください。あなたのプロンプトの手順どおりに最後までやり切ります。
 
-1. novel_context(chapterNumber: {N}) で資料をそろえ、「参照するスキル」（novel-writing とジャンルスキル・二次創作なら novel-fanfic）を読み込む
-2. プロット・企画書のトーン＆NGライン・ことばづかいを守って1話を書き、novel_save_chapter(chapterNumber: {N}, ...) で保存する
-3. 表記の ❌ があれば novel_check で直して保存し直す。文章の ⚠️（教訓まとめ・反AI）も必要分を書き直す（保存し直しは最大2回まで）
+1. novel_context(chapterNumber: {N}) で資料をそろえ、「参照するスキル」を読み込む
+2. 資料の条件・文体見本・トーン＆NGライン・ことばづかいに沿って1話を書き、novel_save_chapter(chapterNumber: {N}, ...) で保存する（機械修正可能な表記は保存時に自動整形される）
+3. 自動整形後に表記の ❌ が残った場合のみ novel_check で確認して直し、文章の ⚠️ も必要分だけ書き直す（保存し直しは最大2回まで）
 4. novel_update で character-state・summary・foreshadow を更新する（全体の流れの ⚠️ が出ていれば更新）
 5. シーン一覧がある話なら書いたシーンを [x] にする
 

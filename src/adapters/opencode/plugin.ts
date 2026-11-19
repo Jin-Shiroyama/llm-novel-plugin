@@ -92,13 +92,14 @@ export function createOpenCodePlugin(pluginRoot: string): Plugin {
         }),
 
         novel_save_chapter: tool({
-          description: `書き上げた1話を chapters ディレクトリに保存する。連番付け・文字数計算・旧稿の .novel/drafts/ 退避・表記と文章チェックを自動で行う。
+          description: `書き上げた1話を chapters ディレクトリに保存する。連番付け・文字数と目安（±15%）の比較・旧稿の .novel/drafts/ 退避・表記の自動整形（既定 ON）と点検を自動で行う。
 プロローグ・幕間・エピローグは section で指定する。`,
           args: {
             ...sectionArgs("保存する"),
             title: z.string().describe("サブタイトル（話タイトル）"),
             content: z.string().describe("本文。見出し行は含めない"),
             updateState: z.boolean().optional().describe("保存後に記録更新の案内を出すかどうか。既定 true"),
+            autoFix: z.boolean().optional().describe("機械的に直せる表記（会話末の句点・半角!?・字下げなど）を保存時に自動整形するかどうか。既定 true"),
           },
           async execute(args, context) {
             return novelSaveChapterExecute(args as any, { projectDir: context.directory })
@@ -155,12 +156,13 @@ ${FORESHADOW_EXAMPLE}`,
         }),
 
         novel_check: tool({
-          description: `本文の表記（❌ 規約違反 / ⚠️ 確認）と文章（⚠️ 反AI・教訓まとめ・文末連続・長い文）を点検し、行と字の位置つきで返す。`,
+          description: `本文の表記（❌ 規約違反 / ⚠️ 確認）と文章（⚠️ 反AI・教訓まとめ・文末連続・長い文）を点検し、行と字の位置つきで返す。fix: true で機械修正可能な表記を自動修正して保存できる。`,
           args: {
             section: z.enum(SECTION_KINDS).optional().describe("点検する節の種類。省くと chapterNumber の話、どちらも省くと全話"),
             chapterNumber: z.number().int().positive().optional().describe("点検する話番号"),
             interludeIndex: z.number().int().positive().optional().describe("幕間のとき何番目か。既定 1"),
             maxIssues: z.number().int().positive().optional().describe("1話あたりに並べる箇所の上限。既定 30"),
+            fix: z.boolean().optional().describe("true のとき、機械的に直せる表記を自動修正して保存する（旧稿は .novel/drafts/ に退避）。既定 false"),
           },
           async execute(args, context) {
             return novelCheckExecute(args as any, { projectDir: context.directory })

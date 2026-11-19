@@ -121,6 +121,7 @@ describe("E2E ワークフロー: ジャンル別（ラブコメ／ファンタ�
 
     const saveOut = await novelSaveChapterExecute({ chapterNumber: 1, title: "食品ロス防止という名のカツアゲ", content: body }, ctx)
     assert.ok(saveOut.includes("✅ 第1話"))
+    assert.ok(saveOut.includes("目安 3,000文字 ±15%"))
     assert.ok(saveOut.includes("規約から外れた箇所はありません"))
 
     const checkOut = await novelCheckExecute({ chapterNumber: 1 }, ctx)
@@ -169,6 +170,42 @@ describe("E2E ワークフロー: ジャンル別（ラブコメ／ファンタ�
     assert.ok(outSweet.includes("genre-romance"))
     assert.ok(outSweet.includes("genre-slice-of-life"))
     assert.equal(existsSync(join(dirSweet, ".novel/world-building.md")), false)
+  })
+
+  test("保存時の自動整形（既定 ON）・目安文字数比較・novel_check(fix: true) が正しく動く", async () => {
+    const dir = makeDir()
+    const ctx = { projectDir: dir }
+    await novelInitExecute(
+      { title: "自動整形テスト", genre: "現代ファンタジー", targetWords: 100, chapterCount: 1 },
+      ctx,
+    )
+
+    // 既定 autoFix: true で保存時に表記が自動整形され、目安文字数（100±15%）と比較される
+    const dirtyBody = "「行こう。」\n廊下を歩いた!　３メートル先だ。"
+    const saveOut = await novelSaveChapterExecute({ chapterNumber: 1, title: "テスト", content: dirtyBody }, ctx)
+    assert.ok(saveOut.includes("✨ 表記を自動整形しました"))
+    assert.ok(saveOut.includes("規約から外れた箇所はありません"))
+    assert.ok(saveOut.includes("目安 100文字 ±15%"))
+    assert.ok(saveOut.includes("少なめ"))
+    const savedFile = readFileSync(join(dir, ".novel/chapters/chapter-001.md"), "utf-8")
+    assert.ok(savedFile.includes("「行こう」\n　廊下を歩いた！　3メートル先だ。"))
+
+    // autoFix: false で未整形のまま保存したあと、novel_check(fix: true) で自動修正＋旧稿退避できる
+    const unfixedOut = await novelSaveChapterExecute(
+      { chapterNumber: 2, title: "未整形", content: "「閉じてない\n「行く。」", autoFix: false },
+      ctx,
+    )
+    assert.ok(unfixedOut.includes("❌ 規約違反"))
+    const fixOut = await novelCheckExecute({ chapterNumber: 2, fix: true }, ctx)
+    assert.ok(fixOut.includes("✨ 表記を自動修正しました"))
+    assert.ok(fixOut.includes("旧稿は .novel/drafts/ に残しました"))
+    // 会話末句点は直り、括弧の閉じ忘れだけが残る
+    assert.ok(fixOut.includes("会話文末の句点 1"))
+    assert.ok(fixOut.includes("❌ 規約違反 1件"))
+    assert.ok(fixOut.includes("括弧の対応"))
+    assert.ok(!fixOut.includes("[-❌] 会話文末の句点") && !fixOut.includes("- ❌ 会話文末の句点"))
+    const fixedFile = readFileSync(join(dir, ".novel/chapters/chapter-002.md"), "utf-8")
+    assert.ok(fixedFile.includes("「行く」"))
   })
 
   test("SF（plot / 完結型）では serial: false となり world-building.md が作られる", async () => {
