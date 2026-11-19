@@ -1,0 +1,61 @@
+{
+  "name": "llm-novel-plugin",
+  "version": "2.0.0",
+  "description": "Light novel & web novel writing plugin for LLM harnesses (OpenCode-first, MCP-ready)",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js"
+    },
+    "./server": {
+      "import": "./dist/index.js"
+    },
+    "./core": {
+      "import": "./dist/core/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "commands",
+    "skills",
+    "README.ja.md",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "tsc && node test-src/prepare-test-out.mjs && node --test \"test-out/test-src/**/*.test.js\" \"test-src/**/*.test.mjs\"",
+    "check:ja": "node scripts/check-japanese.mjs"
+  },
+  "dependencies": {
+    "zod": "^3.24.0"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.4.0"
+  },
+  "peerDependenciesMeta": {
+    "@opencode-ai/plugin": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  },
+  "keywords": [
+    "opencode",
+    "plugin",
+    "mcp-ready",
+    "novel",
+    "light-novel",
+    "web-novel",
+    "writing",
+    "ai",
+    "japanese",
+    "ライトノベル",
+    "Web小説",
+    "小説"
+  ]
+}

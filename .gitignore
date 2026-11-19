@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.js.map
+*.d.ts.map
+
+# テスト用のコンパイル出力
+test-out/
+
+# ローカルの作業メモ（共有しない）
+.notes/
