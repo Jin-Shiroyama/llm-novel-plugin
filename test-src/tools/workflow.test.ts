@@ -37,7 +37,7 @@ describe("E2E ワークフロー: ジャンル別（ラブコメ／ファンタ�
       ctx,
     )
     assert.ok(initOut.includes("準備ができました"))
-    assert.ok(initOut.includes("genre-romcom"))
+    assert.ok(initOut.includes("genre-romance"))
     // ラブコメは world-building.md と reality-source.md を作らない
     assert.equal(existsSync(join(dir, ".novel/world-building.md")), false)
     assert.equal(existsSync(join(dir, ".novel/reality-source.md")), false)
@@ -99,7 +99,7 @@ describe("E2E ワークフロー: ジャンル別（ラブコメ／ファンタ�
     assert.ok(contextOut.includes("重いトラウマや教訓まとめを絶対に足さない"))
     assert.ok(contextOut.includes("軽快・明るめ"))
     assert.ok(contextOut.includes("字下げなし"))
-    assert.ok(contextOut.includes("genre-romcom"))
+    assert.ok(contextOut.includes("genre-romance"))
     assert.ok(contextOut.includes("佐伯くん"))
 
     const body = `放課後の図書準備室。白瀬が俺の卵焼きを一口頬張った。
@@ -132,6 +132,34 @@ describe("E2E ワークフロー: ジャンル別（ラブコメ／ファンタ�
     assert.ok(exportOut.includes("✅ 原稿を書き出しました"))
     const indexTxt = readFileSync(join(dir, ".novel/export/episodes/index.txt"), "utf-8")
     assert.ok(indexTxt.includes("第1話　食品ロス防止という名のカツアゲ"))
+  })
+
+  test("日常系（恋愛なし）では genre-slice-of-life のみが案内され、いちゃラブ日常では genre-romance と併用される", async () => {
+    const dirDaily = makeDir()
+    const outDaily = await novelInitExecute(
+      {
+        title: "美術室は今日も扇風機が回らない",
+        genre: "学園日常",
+        storyMode: "episodic",
+      },
+      { projectDir: dirDaily },
+    )
+    assert.ok(outDaily.includes("genre-slice-of-life"))
+    assert.ok(!outDaily.includes("genre-romance"))
+    assert.equal(existsSync(join(dirDaily, ".novel/world-building.md")), false)
+
+    const dirSweet = makeDir()
+    const outSweet = await novelInitExecute(
+      {
+        title: "鉄壁主任は家に帰ると3パーセントになる",
+        genre: "いちゃラブ日常",
+        storyMode: "episodic",
+      },
+      { projectDir: dirSweet },
+    )
+    assert.ok(outSweet.includes("genre-romance"))
+    assert.ok(outSweet.includes("genre-slice-of-life"))
+    assert.equal(existsSync(join(dirSweet, ".novel/world-building.md")), false)
   })
 
   test("SF（plot / 完結型）では serial: false となり world-building.md が作られる", async () => {

@@ -16,7 +16,7 @@ agent: novel-planner
 ## 進めかた
 
 ### 一、スキルを読み込む
-- `novel-planning` skill と、ジャンルに合うスキル（`genre-fantasy` / `genre-romcom` / `genre-sf`）を読み込む
+- `novel-planning` skill と、ジャンルに合うスキル（`genre-fantasy` / `genre-romance` / `genre-slice-of-life` / `genre-sf`）を読み込む
 - 二次創作なら `novel-fanfic` も読み、原作どおりの設定は `.novel/canon/setting.md` に任せ、`world-building.md` にはこの作品独自の追加・変更点だけを書く
 
 ### 二、対話で決める（`Question` ツール）

@@ -16,7 +16,7 @@ agent: novel-planner
 
 ### 一、スキルを読み込む
 - `novel-planning` skill を読み込む
-- ジャンルに合うスキル（`genre-fantasy` / `genre-romcom` / `genre-sf`）と、二次創作なら `novel-fanfic` も読み込む
+- ジャンルに合うスキル（`genre-fantasy` / `genre-romance` / `genre-slice-of-life` / `genre-sf`）と、二次創作なら `novel-fanfic` も読み込む
 
 ### 二、対話で企画を固める（`Question` ツール、1回3〜4問まで）
 

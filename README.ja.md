@@ -19,7 +19,7 @@
   - **投稿サイト向け書き出し**：カクヨム・小説家になろう・pixiv・青空文庫・HTML へのルビ変換、1話ずつの分割書き出し（`split: true`）と `index.txt` 生成、カクヨムのキャッチコピー文字数・タグ数チェックに対応。
 - **ジャンル特化スキル（オンデマンド読み込み）**
   - 共通：`novel-planning` / `novel-writing` / `novel-editing`
-  - ジャンル別：`genre-fantasy` / `genre-romcom` / `genre-sf` / `novel-fanfic`
+  - ジャンル別：`genre-fantasy` / `genre-romance` / `genre-slice-of-life` / `genre-sf` / `novel-fanfic`
 
 ## 導入と使い方（OpenCode）
 

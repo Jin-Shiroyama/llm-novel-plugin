@@ -29,7 +29,7 @@ const WORKFLOW_GUIDE = `# 📖 ライトノベル・Web小説の進め方
 | 型 | 向く作品 | 進め方 |
 |---|---|---|
 | \`arc\`（既定） | 異世界ファンタジー、現代異能、SF冒険、バトル | 序盤3話フック → 10〜15話で1つの山（アーク）を重ねる連載 |
-| \`episodic\` | ラブコメ、学園、日常コメディ、スローライフ | 距離感のステップ＋イベント／行事ネタ帳で回ごとに楽しむ連載 |
+| \`episodic\` | ラブコメ・いちゃラブ、学園日常、コメディ、スローライフ | 距離感・暮らしのステップ（または関係良好な日常の広げ方）＋イベント／行事ネタ帳で回ごとに楽しむ連載 |
 | \`plot\` | 文庫1巻完結、SF長編、ミステリ | 序盤・中盤・クライマックスを全体設計して完結させる |
 | \`short\` | 短編・読み切り | 1つの見どころに絞り、プロット概要からすぐ執筆 |
 
@@ -75,7 +75,7 @@ const PROMPTS_GUIDE = `# 📝 プロンプト一覧（novel_update(action: "prom
 
 詳しい執筆技法・ジャンル別のコツはスキルを参照します:
 - 共通: \`novel-planning\` / \`novel-writing\` / \`novel-editing\`
-- ジャンル別: \`genre-fantasy\` / \`genre-romcom\` / \`genre-sf\` / \`novel-fanfic\`
+- ジャンル別: \`genre-fantasy\` / \`genre-romance\` / \`genre-slice-of-life\` / \`genre-sf\` / \`novel-fanfic\`
 `
 
 const WRITING_GUIDE = `# ✍️ ライトノベル・Web小説の書きかた（要点）

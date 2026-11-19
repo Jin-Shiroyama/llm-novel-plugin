@@ -30,7 +30,7 @@ export function createNovelWriterAgent(): Record<string, unknown> {
 ## 1話を書く手順
 
 1. **novel_context** で資料をそろえる（\`chapterNumber\` または \`section\`）
-2. 「書くときの条件」の **参照するスキル** を確認し、\`novel-writing\` と該当ジャンルスキル（\`genre-fantasy\` / \`genre-romcom\` / \`genre-sf\` / \`novel-fanfic\`）を読み込む
+2. 「書くときの条件」の **参照するスキル** を確認し、\`novel-writing\` と該当ジャンルスキル（\`genre-fantasy\` / \`genre-romance\` / \`genre-slice-of-life\` / \`genre-sf\` / \`novel-fanfic\`）を読み込む
 3. 資料を読む：プロット（P0）、**企画書のフック・面白さ・トーン＆NGライン**、キャラの魅力と **🗣️ ことばづかい**、現在の状態、前の話の末尾、用語集、伏線
 4. 1話を通して書く。分量は「この話の目安」（±15%）に収める
 5. **novel_save_chapter** で保存する（本文に見出し行を入れない）

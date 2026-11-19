@@ -11,6 +11,7 @@ description: "SF・近未来・宇宙冒険・サイバーパンク・タイム�
 </role>
 
 > 共通の表記規約・反 AI 一覧・ログやチャット画面の書式は `novel-writing` skill が正本です。
+> 近未来日常・スローライフ要素なら `genre-slice-of-life`、SF ラブコメなら `genre-romance` を併用します。
 
 ---
 

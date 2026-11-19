@@ -13,7 +13,8 @@ const EXPECTED_SKILLS = [
   "novel-writing",
   "novel-editing",
   "genre-fantasy",
-  "genre-romcom",
+  "genre-romance",
+  "genre-slice-of-life",
   "genre-sf",
   "novel-fanfic",
 ]
@@ -26,7 +27,7 @@ function extractTextCodeBlocks(markdown: string): string[] {
 }
 
 describe("スキル構成と作例品質（checkTypography / checkProse）", () => {
-  test("7本のスキルがすべて存在し、不要な旧スキルが存在しない", () => {
+  test("8本のスキルがすべて存在し、不要な旧スキルが存在しない", () => {
     const skillsDir = join(root, "skills")
     const dirs = readdirSync(skillsDir).sort()
     assert.deepEqual(dirs, [...EXPECTED_SKILLS].sort())
@@ -77,6 +78,7 @@ describe("回帰ガード: 文芸・時代小説・社会派・葛藤強制の�
     "novel-wuxia",
     "novel-reality",
     "reality-source",
+    "genre-romcom",
     "2つのジレンマを必ず置く",
     "必ず制約と代償を置く",
     "主要人物には必ず動機の三角形",

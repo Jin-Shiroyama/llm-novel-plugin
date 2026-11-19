@@ -21,7 +21,7 @@ agent: novel-writer
 
 ### 一、資料をそろえ、該当スキルを読み込む
 1. `novel_context` を呼ぶ（`chapterNumber` または `section`、特定シーンだけなら `sceneId`）
-2. 「書くときの条件」の **参照するスキル** を確認し、`novel-writing` と該当スキル（`genre-fantasy` / `genre-romcom` / `genre-sf` / `novel-fanfic`）を読み込む
+2. 「書くときの条件」の **参照するスキル** を確認し、`novel-writing` と該当スキル（`genre-fantasy` / `genre-romance` / `genre-slice-of-life` / `genre-sf` / `novel-fanfic`）を読み込む
 3. プロジェクトやプロットが未作成なら、ここで止めて `/novel-init` や `/novel-outline` を案内する
 
 ### 二、資料の要点を頭に入れる

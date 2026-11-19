@@ -14,7 +14,8 @@ import {
   MINIMAL_WORLD_GENRE_KEYWORDS,
   LIGHT_TONE_GENRE_KEYWORDS,
   FANTASY_GENRE_KEYWORDS,
-  ROMCOM_GENRE_KEYWORDS,
+  ROMANCE_GENRE_KEYWORDS,
+  SLICE_OF_LIFE_GENRE_KEYWORDS,
   SF_GENRE_KEYWORDS,
 } from "./constants.js"
 import type {
@@ -855,7 +856,8 @@ export function recommendedGenreSkills(genre: string | undefined | null): string
   if (!norm) return []
   const skills: string[] = []
   if (FANTASY_GENRE_KEYWORDS.some((k) => norm.includes(k))) skills.push("genre-fantasy")
-  if (ROMCOM_GENRE_KEYWORDS.some((k) => norm.includes(k))) skills.push("genre-romcom")
+  if (ROMANCE_GENRE_KEYWORDS.some((k) => norm.includes(k))) skills.push("genre-romance")
+  if (SLICE_OF_LIFE_GENRE_KEYWORDS.some((k) => norm.includes(k))) skills.push("genre-slice-of-life")
   if (SF_GENRE_KEYWORDS.some((k) => norm.includes(k))) skills.push("genre-sf")
   return skills
 }
@@ -895,7 +897,7 @@ export function storyModeLabel(mode: StoryMode): string {
     case "arc":
       return "アーク連載型（10〜15話で1つの山）"
     case "episodic":
-      return "日常・イベント型（掛け合い・行事・距離感で進む）"
+      return "日常・イベント型（掛け合い・行事・甘さや暮らしで進む）"
     case "plot":
       return "完結プロット型（1巻完結・全体構成）"
     case "short":

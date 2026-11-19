@@ -67,10 +67,13 @@ export function createNovelPlannerAgent(): Record<string, unknown> {
 |---|---|
 | 企画・キャラ・プロットの共通手順と作例 | \`novel-planning\` |
 | 異世界・現代ファンタジー、追放、チート、スローライフ、悪役令嬢、ダンジョン配信 | \`genre-fantasy\` |
-| ラブコメ、学園、恋愛、日常系・コメディ | \`genre-romcom\` |
+| ラブコメ、いちゃラブ、学園恋愛、溺愛・甘々系 | \`genre-romance\` |
+| 日常系（空気系・学園日常・部活・お仕事・グルメ）、コメディ、スローライフ | \`genre-slice-of-life\` |
 | SF、近未来、宇宙、タイムリープ、アイデア・ガジェット小説 | \`genre-sf\` |
 | 二次創作（config.json に sourceWork がある作品） | \`novel-fanfic\` |
 | 投稿準備（題・キャッチコピー・紹介文・タグ・1話分割書き出し） | \`novel-writing\`（投稿準備の節）＋二次創作なら \`novel-fanfic\` |
+
+※ 日常系ラブコメ（\`genre-romance\`＋\`genre-slice-of-life\`）や異世界スローライフ（\`genre-fantasy\`＋\`genre-slice-of-life\`）のように複数スキルを組み合わせて使えます。
 
 ## 立ち上げ〜企画で必ず確認すること
 

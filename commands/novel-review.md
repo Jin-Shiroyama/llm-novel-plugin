@@ -27,7 +27,7 @@ agent: novel-editor
 
 ### 一、スキルを読み込む
 - `novel-editing` skill と `novel-writing` skill を読み込む
-- ジャンルに合うスキル（`genre-fantasy` / `genre-romcom` / `genre-sf`）と、二次創作（`sourceWork` あり）なら `novel-fanfic` も読み込む
+- ジャンルに合うスキル（`genre-fantasy` / `genre-romance` / `genre-slice-of-life` / `genre-sf`）と、二次創作（`sourceWork` あり）なら `novel-fanfic` も読み込む
 
 ### 二、資料と機械点検をそろえる
 1. `novel_check` を呼び、表記の ❌/⚠️ と文章の ⚠️（できあいの言い回し・教訓まとめ・文末連続・長い文）を先に把握する

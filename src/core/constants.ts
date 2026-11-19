@@ -100,22 +100,35 @@ export const CHAPTER_WORD_TOLERANCE = 0.15
 export const MINIMAL_WORLD_GENRE_KEYWORDS = [
   "ラブコメ",
   "恋愛",
+  "いちゃラブ",
+  "イチャラブ",
+  "溺愛",
+  "甘々",
   "日常",
   "コメディ",
   "学園",
   "青春",
   "現代ドラマ",
   "スローライフ",
+  "ほのぼの",
+  "ギャグ",
+  "部活",
+  "グルメ",
+  "お仕事",
 ] as const
 
 /** シリアス度を既定で light（軽快・明るめ）と推定するジャンルキーワード */
 export const LIGHT_TONE_GENRE_KEYWORDS = [
   "ラブコメ",
+  "いちゃラブ",
+  "イチャラブ",
+  "甘々",
   "日常",
   "コメディ",
   "スローライフ",
   "ほのぼの",
   "ギャグ",
+  "空気系",
 ] as const
 
 /** ファンタジー系ジャンル判定キーワード（スキル案内に使用） */
@@ -134,17 +147,32 @@ export const FANTASY_GENRE_KEYWORDS = [
   "VRMMO",
 ] as const
 
-/** ラブコメ・日常系ジャンル判定キーワード（スキル案内に使用） */
-export const ROMCOM_GENRE_KEYWORDS = [
+/** 恋愛・ラブコメ系ジャンル判定キーワード（スキル案内に使用） */
+export const ROMANCE_GENRE_KEYWORDS = [
   "ラブコメ",
   "恋愛",
+  "いちゃラブ",
+  "イチャラブ",
+  "溺愛",
+  "甘々",
+  "恋人",
+  "夫婦",
+  "純愛",
+] as const
+
+/** 日常系・コメディ・スローライフ系ジャンル判定キーワード（スキル案内に使用） */
+export const SLICE_OF_LIFE_GENRE_KEYWORDS = [
   "日常",
   "コメディ",
-  "学園",
-  "青春",
   "スローライフ",
   "ほのぼの",
   "ギャグ",
+  "空気系",
+  "青春",
+  "部活",
+  "グルメ",
+  "料理",
+  "お仕事",
 ] as const
 
 /** SF系ジャンル判定キーワード（スキル案内に使用） */

@@ -29,22 +29,34 @@ function writeFile(root: string, rel: string, content: string): void {
 }
 
 describe("ジャンル推定とスキル案内", () => {
-  test("ラブコメ・日常系は worldBuilding: minimal、seriousness: light と推定する", () => {
+  test("恋愛・ラブコメ・いちゃラブ・日常系は worldBuilding: minimal、対応するスキルを分けて返す", () => {
     assert.equal(inferWorldBuilding("ラブコメ"), "minimal")
+    assert.equal(inferWorldBuilding("いちゃラブ"), "minimal")
     assert.equal(inferWorldBuilding("学園・日常コメディ"), "minimal")
     assert.equal(inferSeriousness("ラブコメ"), "light")
+    assert.equal(inferSeriousness("いちゃラブ"), "light")
     assert.equal(inferSeriousness("スローライフ"), "light")
-    assert.deepEqual(recommendedGenreSkills("ラブコメ"), ["genre-romcom"])
+    assert.deepEqual(recommendedGenreSkills("ラブコメ"), ["genre-romance"])
+    assert.deepEqual(recommendedGenreSkills("いちゃラブ"), ["genre-romance"])
+    assert.deepEqual(recommendedGenreSkills("学園日常"), ["genre-slice-of-life"])
+    assert.deepEqual(recommendedGenreSkills("スローライフ"), ["genre-slice-of-life"])
+    assert.deepEqual(recommendedGenreSkills("青春コメディ"), ["genre-slice-of-life"])
+    assert.deepEqual(recommendedGenreSkills("いちゃラブ日常"), ["genre-romance", "genre-slice-of-life"])
+    assert.deepEqual(recommendedGenreSkills("学園ラブコメ・日常"), ["genre-romance", "genre-slice-of-life"])
   })
 
-  test("異世界ファンタジー・SF は worldBuilding: standard、対応スキルを返す", () => {
+  test("異世界ファンタジー・SF は worldBuilding: standard、対応スキルを返す（学園単体で恋愛スキルを誤推薦しない）", () => {
     assert.equal(inferWorldBuilding("異世界ファンタジー"), "standard")
     assert.equal(inferWorldBuilding("近未来SF"), "standard")
     assert.equal(inferWorldBuilding("学園ラブコメSF"), "standard")
+    assert.equal(inferWorldBuilding("学園異能バトル"), "standard")
     assert.equal(inferSeriousness("異世界ファンタジー"), "balanced")
     assert.deepEqual(recommendedGenreSkills("異世界ファンタジー"), ["genre-fantasy"])
+    assert.deepEqual(recommendedGenreSkills("異世界スローライフ"), ["genre-fantasy", "genre-slice-of-life"])
+    assert.deepEqual(recommendedGenreSkills("学園異能バトル"), ["genre-fantasy"])
     assert.deepEqual(recommendedGenreSkills("近未来SF"), ["genre-sf"])
-    assert.deepEqual(recommendedGenreSkills("学園ラブコメSF"), ["genre-romcom", "genre-sf"])
+    assert.deepEqual(recommendedGenreSkills("学園SF"), ["genre-sf"])
+    assert.deepEqual(recommendedGenreSkills("学園ラブコメSF"), ["genre-romance", "genre-sf"])
   })
 
   test("短編はジャンルに関わらず worldBuilding: minimal", () => {

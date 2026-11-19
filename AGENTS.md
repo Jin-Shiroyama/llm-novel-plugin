@@ -58,12 +58,13 @@ llm-novel-plugin/
 │               ├── novel-writer.ts       # 本文書き手
 │               └── novel-editor.ts       # エンタメ担当編集者
 ├── commands/                             # OpenCode スラッシュコマンド（13本）
-├── skills/                               # ハーネス非依存 Agent Skills（7本）
+├── skills/                               # ハーネス非依存 Agent Skills（8本）
 │   ├── novel-planning/                   # 企画・キャラ・プロットの正本
 │   ├── novel-writing/                    # 表記規約・反AI・語り・特殊書式・投稿準備の正本
 │   ├── novel-editing/                    # エンタメ編集者の点検観点・リライトの正本
 │   ├── genre-fantasy/                    # 異世界・現代ファンタジー特化
-│   ├── genre-romcom/                     # ラブコメ・学園・日常コメディ特化
+│   ├── genre-romance/                    # 恋愛・ラブコメ・いちゃラブ特化
+│   ├── genre-slice-of-life/              # 日常系・コメディ・スローライフ特化
 │   ├── genre-sf/                         # SF・近未来・アイデア小説特化
 │   └── novel-fanfic/                     # 二次創作（原作資料・照合・権利と規約）
 ├── scripts/

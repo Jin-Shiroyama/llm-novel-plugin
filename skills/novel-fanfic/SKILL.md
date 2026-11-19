@@ -12,7 +12,7 @@ description: "二次創作を書くための skill。原作の資料（.novel/ca
 </role>
 
 > 表記規約と反 AI 一覧の正本は `novel-writing` skill です。
-> ジャンルごとの面白さのコツは `genre-fantasy` / `genre-romcom` / `genre-sf` をあわせて読み込みます。
+> ジャンルごとの面白さのコツは `genre-fantasy` / `genre-romance` / `genre-slice-of-life` / `genre-sf` をあわせて読み込みます。
 
 ---
 
