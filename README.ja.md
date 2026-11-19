@@ -30,19 +30,21 @@ pnpm install
 pnpm build
 ```
 
-`opencode.json` の設定例（ローカルパスで読み込む場合）：
+`opencode.json` の設定例（ビルド済みローカルファイルで読み込む場合）：
 
 ```json
 {
-  "plugin": ["file:///path/to/llm-novel-plugin"],
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["file:///path/to/llm-novel-plugin/dist/index.js"],
   "agent": {
     "novel-writer": {
-      "model": "anthropic/claude-sonnet-4-5"
+      "model": "<provider>/<model>"
     }
   }
 }
 ```
 
+- `plugin` にはビルド後のエントリポイント（`dist/index.js`）までの `file://` パスを指定してください（環境や OpenCode のバージョンにより記法が異なる場合は公式ドキュメントをご確認ください）。
 - 既定の権限では `novel-writer` / `novel-editor` の `bash` は `deny`、`novel-planner` は `ask` に設定されています。`git` などを使いたい場合は `opencode.json` の `agent.<name>.permission.bash` で上書きできます。
 
 主なスラッシュコマンド：

@@ -19,6 +19,7 @@ import { checkProse } from "../src/core/prose.js"
 import { conceptParts, worldBuildingParts } from "../src/core/doc-sections.js"
 import { CONCEPT_TEMPLATE, WORLD_BUILDING_TEMPLATE } from "../src/core/templates.js"
 import { listPromptTemplates, buildPromptVars, getPromptTemplate } from "../src/core/prompts.js"
+import { parseSummaryInput, upsertSummarySections, LEGACY_HEADING } from "../src/core/records.js"
 
 function makeTempProject(): string {
   return mkdtempSync(join(tmpdir(), "llm-novel-v2-"))
@@ -146,6 +147,10 @@ describe("進行段階（determinePhase）の軽量化", () => {
     assert.ok(hanKana.strong.includes("白瀬"))
     assert.ok(hanKana.strong.includes("しおり"))
 
+    const fourHan = characterNameKeys("佐伯悠真")
+    assert.deepEqual(fourHan.strong.sort(), ["佐伯", "佐伯悠真", "悠真"].sort())
+    assert.deepEqual(fourHan.weak, [])
+
     const middleDot = characterNameKeys("リナ・フォレスト")
     assert.ok(middleDot.strong.includes("リナ"))
     assert.ok(middleDot.strong.includes("フォレスト"))
@@ -185,7 +190,7 @@ describe("表記の点検（typography）: 字下げ設定と特殊書式", () =
     const dirty = [
       "放課後の廊下は３メートル先に窓がある。",
       "　「行こう。」",
-      "「本当か?彼はまだ HP1200 だ!」",
+      "「本当か?彼はまだHP1200だ!」",
       "「待て!　」「どこだ!?」",
       "...　それで—どうなったんだ。",
       "｜背負子《しょいこ》が軽い。",
@@ -215,11 +220,51 @@ describe("表記の点検（typography）: 字下げ設定と特殊書式", () =
     const res = fixTypography(dirty, { indent: "fullwidth" })
     assert.equal(res.text, expected)
     assert.ok(res.totalFixes > 0)
+    assert.ok(res.changes.length > 0)
     assert.deepEqual(checkTypography(res.text, { indent: "fullwidth" }), [])
     // 冪等性
     const second = fixTypography(res.text, { indent: "fullwidth" })
     assert.equal(second.text, expected)
     assert.equal(second.totalFixes, 0)
+    assert.deepEqual(second.changes, [])
+  })
+
+  test("fixTypography は特殊書式（罫線ステータス・通知・配信・記号・URL）と確認どまり（⚠️）を書き換えない", () => {
+    const special = [
+      "┌────────┐",
+      "│ 名前：ミナト │",
+      "│ HP：120／120 │",
+      "└────────┘",
+      "",
+      "＜レベルが上がりました！＞",
+      "＞すげえ！ｗ",
+      "「好き！♡」",
+      "　詳細はこちら https://example.com/?q=1&a=2 と example.com/?page=3 を確認した。",
+      "　彼は Hello World と言った。",
+      "　　詩の1行目。",
+    ].join("\n")
+
+    const res = fixTypography(special, { indent: "fullwidth" })
+    assert.equal(res.text, special)
+    assert.equal(res.totalFixes, 0)
+    assert.deepEqual(res.changes, [])
+    // 点検でもエラー（❌）は 0 件（Hello World の ascii-space と 2字字下げは ⚠️ のみ）
+    const errors = checkTypography(special, { indent: "fullwidth" }).filter((i) => i.severity === "error")
+    assert.deepEqual(errors, [])
+  })
+
+  test("あらすじの「全体の流れ（第N話まで）」を受理し、旧形式へ誤移送しない", () => {
+    const parsed = parseSummaryInput("## 全体の流れ（第3話まで）\n\n三話までのあらすじ。", undefined)
+    assert.equal(parsed.ok, true)
+
+    const current = "# 『テスト』これまでのあらすじ\n\n## 全体の流れ（第3話まで）\n\n三話までのあらすじ。\n\n## 第1章 始まり\n\n始まった。\n"
+    const next = upsertSummarySections(
+      current,
+      [{ chapter: 2, heading: "## 第2章 続き", body: "続いた。" }],
+      2,
+    )
+    assert.ok(next.includes("三話までのあらすじ。"))
+    assert.ok(!next.includes(LEGACY_HEADING))
   })
 
   test("fixTypography は indent: none の字下げ除去に対応し、括弧崩れ・ルビ崩れ・長音符「ーー」には触らない", () => {

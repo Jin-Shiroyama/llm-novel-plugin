@@ -11,11 +11,12 @@ import {
   checkTypography,
   fixTypography,
   formatFixSummary,
+  formatFixChanges,
   countByRule,
   formatIssue,
   TYPOGRAPHY_RULE_LABELS,
 } from "../core/typography.js"
-import type { TypographyIssue, TypographyRule, GlossaryCheck } from "../core/typography.js"
+import type { TypographyIssue, TypographyRule, TypographyFixChange, GlossaryCheck } from "../core/typography.js"
 import { formatChapterRanges } from "../core/records.js"
 import {
   listManuscriptFiles,
@@ -71,6 +72,7 @@ export async function novelCheckExecute(args: CheckArgs, ctx: ToolRuntimeContext
   const results: Array<{ section: ManuscriptSection; issues: TypographyIssue[]; prose: ProseIssue[] }> = []
   const unreadable: ManuscriptSection[] = []
   const fixedCounts = new Map<TypographyRule, number>()
+  const fixedChanges: TypographyFixChange[] = []
   let fixedFiles = 0
 
   for (const f of files) {
@@ -90,6 +92,7 @@ export async function novelCheckExecute(args: CheckArgs, ctx: ToolRuntimeContext
         for (const item of fixed.fixes) {
           fixedCounts.set(item.rule, (fixedCounts.get(item.rule) ?? 0) + item.count)
         }
+        fixedChanges.push(...fixed.changes)
       }
     }
     results.push({ section: f.section, issues: checkTypography(text, { indent, glossary }), prose: checkProse(text) })
@@ -109,7 +112,7 @@ export async function novelCheckExecute(args: CheckArgs, ctx: ToolRuntimeContext
   const fixNote = !applyFix
     ? ""
     : totalFixed > 0
-      ? `✨ 表記を自動修正しました（${totalFixed}件／${fixedFiles}ファイル: ${formatFixSummary(fixedList)}。旧稿は .novel/drafts/ に残しました）\n`
+      ? `✨ 表記を自動修正しました（${totalFixed}件／${fixedFiles}ファイル: ${formatFixSummary(fixedList)}。旧稿は .novel/drafts/ に残しました）\n${formatFixChanges(fixedChanges)}`
       : `ℹ️ 自動修正できる表記箇所はありませんでした\n`
 
   const all = results.flatMap((r) => r.issues)

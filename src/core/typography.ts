@@ -63,15 +63,55 @@ export interface GlossaryCheck {
 const OPEN_BRACKETS: Record<string, string> = { "「": "」", "『": "』" }
 const CLOSE_BRACKETS: Record<string, string> = { "」": "「", "』": "『" }
 
-const CLOSERS = new Set(["」", "』", "）", ")", "】", "〕", "〉", "》"])
-const FOLLOWING_PUNCTUATION = new Set(["…", "―", "、", "。", "・", "（", "「", "『", "♪"])
+const CLOSERS = new Set(["」", "』", "）", ")", "】", "〕", "〉", "》", "＞", ">", "］", "]", "｝", "}", "≫"])
+const FOLLOWING_PUNCTUATION = new Set(["…", "―", "、", "。", "・", "（", "「", "『", "♪", "♡", "♥", "☆", "★", "♫", "♬", "ｗ", "w"])
 const NO_SPACE_BEFORE = new Set(["！", "？", "!", "?", "…", "―", "、", "。", "・"])
 
 const KATAKANA = /[ァ-ヺー]/
 const JAPANESE = /[぀-ヿ㐀-鿿豈-﫿々〆ヶ]/
 const ASCII_ALNUM = /[A-Za-z0-9]/
+const BOX_FRAME_CHAR = /[\u2502-\u257F]/
+const BOX_DRAWING_ONLY = /^[\u2500-\u257F\s　]+$/
+const URL_PATTERN =
+  /(?:https?:\/\/[^\s　「」『』（）()<>＜＞【】]+)|(?:(?<![A-Za-z0-9._-])(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}(?:\/[^\s　「」『』（）()<>＜＞【】]*)?)/g
 
 const SEPARATOR_LINE = /^[\s　]*[＊*◇◆□■○●※・〜~\-－―]+(?:[\s　]*[＊*◇◆□■○●※・〜~\-－―]+)*[\s　]*$/
+
+/** 罫線で囲んだステータス画面・枠・罫線区切りの行か（ダッシュ代用「──それで」とは区別する） */
+export function isBoxDrawingLine(line: string): boolean {
+  const trimmed = line.replace(/^[\s　]+/, "")
+  if (trimmed.length === 0) return false
+  const first = [...trimmed][0]
+  if (BOX_FRAME_CHAR.test(first)) return true
+  if (BOX_DRAWING_ONLY.test(trimmed)) return true
+  return false
+}
+
+/** 行内の URL 範囲をコードポイント単位の真偽配列で返す（URL 内の ? ! . 等を誤検出・誤整形しないため） */
+function buildUrlMask(chars: string[]): boolean[] {
+  const mask = new Array<boolean>(chars.length).fill(false)
+  const text = chars.join("")
+  if (!text.includes(".") && !text.includes("://")) return mask
+  // UTF-16 オフセット → コードポイント index の写像
+  const offsetToCp = new Map<number, number>()
+  let offset = 0
+  for (let i = 0; i < chars.length; i++) {
+    offsetToCp.set(offset, i)
+    offset += chars[i].length
+  }
+  offsetToCp.set(offset, chars.length)
+
+  URL_PATTERN.lastIndex = 0
+  for (const m of text.matchAll(URL_PATTERN)) {
+    const startOff = m.index ?? 0
+    const endOff = startOff + m[0].length
+    const startCp = offsetToCp.get(startOff)
+    const endCp = offsetToCp.get(endOff)
+    if (startCp === undefined || endCp === undefined) continue
+    for (let k = startCp; k < endCp; k++) mask[k] = true
+  }
+  return mask
+}
 
 /** ステータス画面・心の声・システム通知などの開き括弧。字下げを強制しない */
 const BLOCK_OPENERS = new Set(["【", "（", "(", "＜", "<", "〈", "《", "≪", "［", "[", "〔", "｛", "{"])
@@ -154,12 +194,16 @@ function checkLine(
   issues: TypographyIssue[],
   indent: IndentStyle,
 ): void {
+  const lineText = chars.join("")
+  if (isBoxDrawingLine(lineText)) return
+
   const add = (column: number, rule: TypographyRule, severity: TypographySeverity, message: string) => {
     const at = column < columns.length ? columns[column] : original.length
     issues.push({ line: lineNo, column: at + 1, rule, severity, message, excerpt: excerptAt(original, at) })
   }
 
   checkIndent(chars, indent, add)
+  const urlMask = buildUrlMask(chars)
 
   const stack: Array<{ ch: string; at: number }> = []
 
@@ -184,6 +228,10 @@ function checkLine(
   }
 
   for (let i = 0; i < chars.length; ) {
+    if (urlMask[i]) {
+      i++
+      continue
+    }
     const ch = chars[i]
 
     if (ch === "…" || ch === "―") {
@@ -210,9 +258,14 @@ function checkLine(
     }
 
     if (ch === "—" || ch === "─" || ch === "–") {
-      add(i, "dash", "error", `ダッシュは「――」（U+2015）を使う（「${ch}」は使わない）`)
       let j = i
       while (chars[j] === ch) j++
+      const adjacentBoxFrame =
+        ch === "─" &&
+        ((i > 0 && BOX_FRAME_CHAR.test(chars[i - 1])) || (j < chars.length && BOX_FRAME_CHAR.test(chars[j])))
+      if (!adjacentBoxFrame) {
+        add(i, "dash", "error", `ダッシュは「――」（U+2015）を使う（「${ch}」は使わない）`)
+      }
       i = j
       continue
     }
@@ -248,7 +301,7 @@ function checkLine(
       continue
     }
 
-    if (ch === " " && i > 0 && i + 1 < chars.length) {
+    if (ch === " " && i > 0 && i + 1 < chars.length && !urlMask[i - 1] && !urlMask[i + 1]) {
       const before = chars[i - 1]
       const after = chars[i + 1]
       if ((JAPANESE.test(before) && ASCII_ALNUM.test(after)) || (ASCII_ALNUM.test(before) && JAPANESE.test(after))) {
@@ -290,10 +343,10 @@ function checkAfterExclamation(
   add(j, "exclamation-space", "error", "感嘆符・疑問符の直後に全角スペースを1つ入れる（「本当か？　彼は」）")
 }
 
-/** 地の文の行か（会話行・区切りの行・ステータス画面・掲示板・配信コメントの行を除く） */
+/** 地の文の行か（会話行・区切りの行・ステータス画面・罫線枠・掲示板・配信コメントの行を除く） */
 export function isNarrationLine(chars: string[]): boolean {
   const line = chars.join("")
-  if (line.trim().length === 0 || /^#/.test(line) || SEPARATOR_LINE.test(line)) return false
+  if (line.trim().length === 0 || /^#/.test(line) || SEPARATOR_LINE.test(line) || isBoxDrawingLine(line)) return false
   let n = 0
   while (chars[n] === "　") n++
   const first = chars[n]
@@ -393,21 +446,32 @@ export interface TypographyFixSummary {
   count: number
 }
 
+export interface TypographyFixChange {
+  /** 1始まりの行番号 */
+  line: number
+  before: string
+  after: string
+}
+
 export interface FixTypographyResult {
   text: string
   /** 自動修正した総件数（0 なら変更なし） */
   totalFixes: number
   /** 規則ごとの修正件数（件数の多い順） */
   fixes: TypographyFixSummary[]
+  /** 変更された行の前後一覧 */
+  changes: TypographyFixChange[]
 }
 
 interface LineToken {
   prefix: string
   char: string
   suffix: string
+  /** URL 範囲など、自動整形で触らないトークン */
+  protected?: boolean
 }
 
-const isPlainToken = (t: LineToken) => t.prefix.length === 0 && t.suffix.length === 0
+const isPlainToken = (t: LineToken) => t.prefix.length === 0 && t.suffix.length === 0 && !t.protected
 const plainToken = (char: string): LineToken => ({ prefix: "", char, suffix: "" })
 const ALT_DASHES = new Set(["—", "─", "–"])
 
@@ -472,9 +536,14 @@ function fixLine(
   indent: IndentStyle,
   counts: Map<TypographyRule, number>,
 ): string {
-  if (line.trim().length === 0 || /^#/.test(line)) return line
+  if (line.trim().length === 0 || /^#/.test(line) || isBoxDrawingLine(line)) return line
   const tokens = tokenizeLine(line)
   if (!tokens) return line
+
+  const urlMask = buildUrlMask(tokens.map((t) => t.char))
+  for (let i = 0; i < tokens.length; i++) {
+    if (urlMask[i]) tokens[i].protected = true
+  }
 
   const bump = (rule: TypographyRule, n = 1) => {
     counts.set(rule, (counts.get(rule) ?? 0) + n)
@@ -514,6 +583,13 @@ function fixLine(
     if (isPlainToken(tokens[i]) && ALT_DASHES.has(ch)) {
       let j = i
       while (j < tokens.length && tokens[j].char === ch && isPlainToken(tokens[j])) j++
+      const adjacentBoxFrame =
+        ch === "─" &&
+        ((i > 0 && BOX_FRAME_CHAR.test(tokens[i - 1].char)) || (j < tokens.length && BOX_FRAME_CHAR.test(tokens[j].char)))
+      if (adjacentBoxFrame) {
+        i = j
+        continue
+      }
       const run = j - i
       const targetLen = run % 2 === 0 ? run : run + 1
       const replacement = Array.from({ length: targetLen }, () => plainToken("―"))
@@ -529,9 +605,9 @@ function fixLine(
   // C. 三点リーダ・ダッシュ直後の全角スペースを除去
   for (let i = 0; i < tokens.length; ) {
     const ch = tokens[i].char
-    if (ch === "…" || ch === "―") {
+    if (!tokens[i].protected && (ch === "…" || ch === "―")) {
       let j = i
-      while (j < tokens.length && tokens[j].char === ch) j++
+      while (j < tokens.length && tokens[j].char === ch && !tokens[j].protected) j++
       const run = j - i
       if (run % 2 === 1) {
         tokens.splice(j, 0, plainToken(ch))
@@ -550,8 +626,9 @@ function fixLine(
     i++
   }
 
-  // D. 半角の ! ? を全角 ！ ？ に統一
+  // D. 半角の ! ? を全角 ！ ？ に統一（URL 内は保護）
   for (const t of tokens) {
+    if (t.protected) continue
     if (t.char === "!") {
       t.char = "！"
       bump("halfwidth-punctuation")
@@ -561,12 +638,12 @@ function fixLine(
     }
   }
 
-  // E. 感嘆符・疑問符のあとの空白ルールを整形
+  // E. 感嘆符・疑問符のあとの空白ルールを整形（URL 内・閉じ括弧・♡/ｗ等の記号前は保護）
   for (let i = 0; i < tokens.length; ) {
     const ch = tokens[i].char
-    if (ch === "！" || ch === "？") {
+    if (!tokens[i].protected && (ch === "！" || ch === "？")) {
       let j = i
-      while (j < tokens.length && (tokens[j].char === "！" || tokens[j].char === "？")) j++
+      while (j < tokens.length && !tokens[j].protected && (tokens[j].char === "！" || tokens[j].char === "？")) j++
       const next = tokens[j]?.char
       if (next !== undefined && !CLOSERS.has(next) && !FOLLOWING_PUNCTUATION.has(next)) {
         if (next === "　" || next === " ") {
@@ -599,10 +676,10 @@ function fixLine(
     i++
   }
 
-  // F. 全角の算用数字（０〜９）を半角へ
+  // F. 全角の算用数字（０〜９）を半角へ（URL 内は保護）
   for (let i = 0; i < tokens.length; ) {
-    if (/[０-９]/.test(tokens[i].char)) {
-      while (i < tokens.length && /[０-９]/.test(tokens[i].char)) {
+    if (!tokens[i].protected && /[０-９]/.test(tokens[i].char)) {
+      while (i < tokens.length && !tokens[i].protected && /[０-９]/.test(tokens[i].char)) {
         tokens[i].char = String.fromCharCode(tokens[i].char.charCodeAt(0) - 0xfee0)
         i++
       }
@@ -612,21 +689,11 @@ function fixLine(
     i++
   }
 
-  // G. 日本語と英数字のあいだの半角スペースを除去
-  for (let i = tokens.length - 2; i >= 1; i--) {
-    if (tokens[i].char === " " && isPlainToken(tokens[i])) {
-      const before = tokens[i - 1].char
-      const after = tokens[i + 1].char
-      if ((JAPANESE.test(before) && ASCII_ALNUM.test(after)) || (ASCII_ALNUM.test(before) && JAPANESE.test(after))) {
-        tokens.splice(i, 1)
-        bump("ascii-space")
-      }
-    }
-  }
+  // ※ ascii-space（日本語と英数字のあいだの半角スペース）は確認どまり（⚠️）のため自動整形しない
 
-  // H. 段落頭の字下げ（indent: fullwidth / none）
+  // G. 段落頭の字下げ（indent: fullwidth / none）
   const visibleLine = tokens.map((t) => t.char).join("")
-  if (!SEPARATOR_LINE.test(visibleLine)) {
+  if (!SEPARATOR_LINE.test(visibleLine) && !isBoxDrawingLine(visibleLine)) {
     let leadEnd = 0
     while (
       leadEnd < tokens.length &&
@@ -654,11 +721,12 @@ function fixLine(
     } else {
       const skipIndent = BLOCK_OPENERS.has(first) || LINE_MARKERS.has(first) || LABEL_LINE.test(restLine)
       if (skipIndent) {
-        if (hasHalfOrTab || leadEnd > 1) {
+        if (hasHalfOrTab) {
           tokens.splice(0, leadEnd)
           bump("indent")
         }
-      } else if (hasHalfOrTab || leadEnd === 0 || leadEnd > 1) {
+      } else if (hasHalfOrTab || leadEnd === 0) {
+        // 2字以上の全角字下げは確認どまり（⚠️）のため意図的なインデントを保護し、自動変更しない
         tokens.splice(0, leadEnd, plainToken("　"))
         bump("indent")
       }
@@ -669,8 +737,8 @@ function fixLine(
 }
 
 /**
- * 機械的に安全に直せる表記規約違反（会話末の句点・半角!?・感嘆符空白・三点リーダ/ダッシュ・全角数字・字下げ・日英間半角空白）を自動整形する。
- * 括弧の対応崩れ・ルビ記法ミス・長音符「ーー」・用語集の禁止表記は文意に関わるため変更しない。
+ * 機械的に安全に直せる表記規約違反（会話末の句点・半角!?・感嘆符空白・三点リーダ/ダッシュ・全角数字・字下げ）を自動整形する。
+ * 罫線枠・URL・ルビ/傍点記法・括弧崩れ・長音符「ーー」・確認どまり（⚠️: ascii-space / glossary-term 等）は変更しない。
  */
 export function fixTypography(
   text: string,
@@ -678,19 +746,37 @@ export function fixTypography(
 ): FixTypographyResult {
   const indent: IndentStyle = opts.indent ?? "fullwidth"
   const counts = new Map<TypographyRule, number>()
+  const changes: TypographyFixChange[] = []
   const fixed = text
     .replace(/\r\n/g, "\n")
     .split("\n")
-    .map((line) => fixLine(line, indent, counts))
+    .map((line, i) => {
+      const next = fixLine(line, indent, counts)
+      if (next !== line) changes.push({ line: i + 1, before: line, after: next })
+      return next
+    })
     .join("\n")
 
   const fixes: TypographyFixSummary[] = [...counts.entries()]
     .map(([rule, count]) => ({ rule, count }))
     .sort((a, b) => b.count - a.count)
   const totalFixes = fixes.reduce((sum, f) => sum + f.count, 0)
-  return { text: fixed, totalFixes, fixes }
+  return { text: fixed, totalFixes, fixes, changes }
 }
 
 export function formatFixSummary(fixes: TypographyFixSummary[]): string {
   return fixes.map(({ rule, count }) => `${TYPOGRAPHY_RULE_LABELS[rule]} ${count}`).join("、")
+}
+
+/** 変更された行の前後スニペットを最大 maxLines 行まで整形する（□ は全角スペース） */
+export function formatFixChanges(changes: TypographyFixChange[], maxLines = 5): string {
+  if (changes.length === 0) return ""
+  const clip = (s: string) => {
+    const shown = s.replace(/　/g, "□")
+    const chars = [...shown]
+    return chars.length > 44 ? chars.slice(0, 44).join("") + "…" : shown
+  }
+  const lines = changes.slice(0, maxLines).map((c) => `  - ${c.line}行目: ${clip(c.before)} → ${clip(c.after)}`)
+  if (changes.length > maxLines) lines.push(`  …ほか${changes.length - maxLines}行`)
+  return lines.join("\n") + "\n"
 }

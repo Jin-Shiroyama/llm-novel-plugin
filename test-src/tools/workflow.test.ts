@@ -184,6 +184,8 @@ describe("E2E ワークフロー: ジャンル別（ラブコメ／ファンタ�
     const dirtyBody = "「行こう。」\n廊下を歩いた!　３メートル先だ。"
     const saveOut = await novelSaveChapterExecute({ chapterNumber: 1, title: "テスト", content: dirtyBody }, ctx)
     assert.ok(saveOut.includes("✨ 表記を自動整形しました"))
+    assert.ok(saveOut.includes("→"))
+    assert.ok(saveOut.includes("整形前の本文を残しました"))
     assert.ok(saveOut.includes("規約から外れた箇所はありません"))
     assert.ok(saveOut.includes("目安 100文字 ±15%"))
     assert.ok(saveOut.includes("少なめ"))

@@ -458,7 +458,7 @@ export function parseSummary(text: string): ParsedSummary {
 }
 
 const OVERVIEW_PATTERN =
-  /^全体の流れ(?:\s*[（(]\s*第\s*([0-9０-９〇零一二三四五六七八九十百千]+)\s*章まで\s*[）)])?$/
+  /^全体の流れ(?:\s*[（(]\s*第\s*([0-9０-９〇零一二三四五六七八九十百千]+)\s*[章話]まで\s*[）)])?$/
 
 /** 章か、章以外の節（プロローグ・幕間・エピローグ）のあらすじか */
 function isEntry(section: SummarySection): boolean {
@@ -510,7 +510,7 @@ function overviewHeading(coverage: number): string {
  */
 export const LEGACY_HEADING = "以前の形式のあらすじ"
 
-const LEGACY_PATTERN = /^以前の形式のあらすじ(?:\s*[（(]\s*第\s*(\d+)\s*章まで\s*[）)])?$/
+const LEGACY_PATTERN = /^以前の形式のあらすじ(?:\s*[（(]\s*第\s*(\d+)\s*[章話]まで\s*[）)])?$/
 
 function isLegacyBlock(section: SummarySection): boolean {
   return !isEntry(section) && LEGACY_PATTERN.test(section.heading.replace(/^##\s+/, "").trim())
@@ -648,7 +648,7 @@ export function parseSummaryInput(
       return {
         ok: false,
         message: summaryError(
-          `「${OVERVIEW_HEADING}」が何章までの要約か分かりません。chapterNumber にその章番号を渡すか、見出しを「## ${OVERVIEW_HEADING}（第N章まで）」にしてください`,
+          `「${OVERVIEW_HEADING}」が何話・何章までの要約か分かりません。chapterNumber に番号を渡すか、見出しを「## ${OVERVIEW_HEADING}（第N話まで）」にしてください`,
         ),
       }
     }

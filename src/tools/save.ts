@@ -19,7 +19,7 @@ import { sectionFromArgs, sectionFileName, sectionLabel, SECTION_NAMES } from ".
 import type { SectionKind } from "../core/sections.js"
 import { summarizeForSave, summarizeProseForSave } from "./check.js"
 import { readGlossaryCheck } from "../core/glossary.js"
-import { fixTypography, formatFixSummary } from "../core/typography.js"
+import { fixTypography, formatFixSummary, formatFixChanges } from "../core/typography.js"
 import { DEFAULTS, CHAPTER_WORD_TOLERANCE } from "../core/constants.js"
 import type { ToolRuntimeContext } from "./types.js"
 
@@ -81,6 +81,14 @@ export async function novelSaveChapterExecute(
       previousNote = `🗂️ 前の原稿を残しました: ${backupPath}\n`
     }
   }
+  let rawBackupPath: string | null = null
+  if (fixResult && fixResult.totalFixes > 0 && body !== rawBody) {
+    rawBackupPath = await backupPreviousDraft(
+      dir,
+      `${fileName.replace(/\.md$/, "")}-before-fix.md`,
+      header + rawBody,
+    )
+  }
   await safeWriteFile(filePath, saved)
 
   const wordCount = countWords(body)
@@ -99,6 +107,10 @@ export async function novelSaveChapterExecute(
   report += formatWordCountLine(wordCount, section, unit, config)
   if (fixResult && fixResult.totalFixes > 0) {
     report += `✨ 表記を自動整形しました（${fixResult.totalFixes}件: ${formatFixSummary(fixResult.fixes)}）\n`
+    report += formatFixChanges(fixResult.changes)
+    if (rawBackupPath) {
+      report += `  🗂️ 整形前の本文を残しました: ${rawBackupPath}\n`
+    }
   }
   report += summarizeForSave(saved, section, undefined, indent, await readGlossaryCheck(dir))
   report += summarizeProseForSave(saved, section)

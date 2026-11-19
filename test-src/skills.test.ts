@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import { readFileSync, readdirSync, existsSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
-import { checkTypography } from "../src/core/typography.js"
+import { checkTypography, fixTypography } from "../src/core/typography.js"
 import { checkProse } from "../src/core/prose.js"
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
@@ -58,6 +58,12 @@ describe("スキル構成と作例品質（checkTypography / checkProse）", () 
           proseIssues,
           [],
           `${name} の作例 #${idx + 1} に文章警告: ${JSON.stringify(proseIssues)}`,
+        )
+        const fixed = fixTypography(block)
+        assert.equal(
+          fixed.totalFixes,
+          0,
+          `${name} の作例 #${idx + 1} が fixTypography で書き換わりました: ${JSON.stringify(fixed.changes)}`,
         )
       }
     }

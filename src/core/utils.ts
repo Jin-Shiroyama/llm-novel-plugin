@@ -493,9 +493,26 @@ export function characterNameKeys(name: string, aliases: string[] = []): { stron
     const chars = [...trimmed]
     const isHan = (c: string) => /^\p{Script=Han}$/u.test(c)
     if (chars.length >= 2 && chars.every(isHan)) {
-      for (let n = 1; n < chars.length; n++) {
-        add(chars.slice(0, n).join(""))
-        add(chars.slice(chars.length - n).join(""))
+      if (chars.length === 2) {
+        // 2字（1+1）
+        add(chars[0])
+        add(chars[1])
+      } else if (chars.length === 3) {
+        // 3字（2+1 または 1+2）
+        add(chars.slice(0, 2).join(""))
+        add(chars[2])
+        add(chars[0])
+        add(chars.slice(1).join(""))
+      } else if (chars.length === 4) {
+        // 4字（2+2 のみ。3字切りや1字切りの「真」等による誤爆を避ける）
+        add(chars.slice(0, 2).join(""))
+        add(chars.slice(2).join(""))
+      } else {
+        // 5字以上（2字または3字の姓・名候補。1字切りはしない）
+        add(chars.slice(0, 2).join(""))
+        add(chars.slice(0, 3).join(""))
+        add(chars.slice(-2).join(""))
+        add(chars.slice(-3).join(""))
       }
     } else {
       // 漢字の姓＋仮名の名（例: 白瀬しおり、星野アイ）は境目で 2 分割する
