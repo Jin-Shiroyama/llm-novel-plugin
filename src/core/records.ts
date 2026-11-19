@@ -96,7 +96,7 @@ const characterChangesSchema = z
   })
   .strict()
 
-const characterUpdateEntrySchema = z.object({ name: stateText, changes: characterChangesSchema }).strict()
+const characterUpdateEntrySchema = z.object({ name: z.string().trim().min(1), changes: characterChangesSchema }).strict()
 
 /**
  * novel_update(character-state) の content。updates が空なら「この節は変化なし」。

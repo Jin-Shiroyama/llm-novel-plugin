@@ -134,21 +134,21 @@ describe("進行段階（determinePhase）の軽量化", () => {
     assert.equal(determinePhase(dir, baseConfig), "characters")
   })
 
-  test("characterNameKeys は漢字氏名を姓・名で分割しつつ、カタカナ名を途中分割して誤検出しない", () => {
+  test("characterNameKeys は記入された区切りと呼称だけを使い、姓名を推測しない", () => {
     const minato = characterNameKeys("ミナト")
     assert.deepEqual(minato.strong, ["ミナト"])
     assert.deepEqual(minato.weak, [])
 
-    const shiori = characterNameKeys("白瀬栞")
+    const shiori = characterNameKeys("白瀬 栞")
     assert.ok(shiori.strong.includes("白瀬"))
     assert.ok(shiori.weak.includes("栞"))
 
-    const hanKana = characterNameKeys("白瀬しおり")
+    const hanKana = characterNameKeys("白瀬しおり", ["白瀬", "しおり"])
     assert.ok(hanKana.strong.includes("白瀬"))
     assert.ok(hanKana.strong.includes("しおり"))
 
     const fourHan = characterNameKeys("佐伯悠真")
-    assert.deepEqual(fourHan.strong.sort(), ["佐伯", "佐伯悠真", "悠真"].sort())
+    assert.deepEqual(fourHan.strong.sort(), ["佐伯悠真"].sort())
     assert.deepEqual(fourHan.weak, [])
 
     const middleDot = characterNameKeys("リナ・フォレスト")
@@ -256,17 +256,17 @@ describe("表記の点検（typography）: 字下げ設定と特殊書式", () =
     assert.deepEqual(errors, [])
   })
 
-  test("URL の直後に日本語が続いていても URL 本体だけを保護し、後ろの日本語・約物は正しく整形する", () => {
+  test("裸のURLと日本語の境界が曖昧なら保持し、明示したURLの後ろは整形する", () => {
     const src = [
       "　example.com/newsです!すごい!",
-      "「サイトはexample.com/topだよ。」",
+      "「サイトは<example.com/top>だよ。」",
     ].join("\n")
     const res = fixTypography(src, { indent: "fullwidth" })
     assert.equal(
       res.text,
       [
-        "　example.com/newsです！　すごい！",
-        "「サイトはexample.com/topだよ」",
+        "　example.com/newsです!すごい!",
+        "「サイトは<example.com/top>だよ」",
       ].join("\n"),
     )
     assert.deepEqual(

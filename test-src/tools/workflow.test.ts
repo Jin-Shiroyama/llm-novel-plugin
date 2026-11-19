@@ -172,7 +172,7 @@ describe("E2E ワークフロー: ジャンル別（ラブコメ／ファンタ�
     assert.equal(existsSync(join(dirSweet, ".novel/world-building.md")), false)
   })
 
-  test("保存時の自動整形（既定 ON）・目安文字数比較・novel_check(fix: true) が正しく動く", async () => {
+  test("保存時の自動整形（明示 ON）・目安文字数比較・novel_check(fix: true) が正しく動く", async () => {
     const dir = makeDir()
     const ctx = { projectDir: dir }
     await novelInitExecute(
@@ -180,9 +180,9 @@ describe("E2E ワークフロー: ジャンル別（ラブコメ／ファンタ�
       ctx,
     )
 
-    // 既定 autoFix: true で保存時に表記が自動整形され、目安文字数（100±15%）と比較される
+    // autoFix: true を明示すると保存時に表記が自動整形され、目安文字数（100±15%）と比較される
     const dirtyBody = "「行こう。」\n廊下を歩いた!　３メートル先だ。"
-    const saveOut = await novelSaveChapterExecute({ chapterNumber: 1, title: "テスト", content: dirtyBody }, ctx)
+    const saveOut = await novelSaveChapterExecute({ chapterNumber: 1, title: "テスト", content: dirtyBody, autoFix: true }, ctx)
     assert.ok(saveOut.includes("✨ 表記を自動整形しました"))
     assert.ok(saveOut.includes("→"))
     assert.ok(saveOut.includes("整形前の本文を残しました"))
@@ -192,18 +192,20 @@ describe("E2E ワークフロー: ジャンル別（ラブコメ／ファンタ�
     const savedFile = readFileSync(join(dir, ".novel/chapters/chapter-001.md"), "utf-8")
     assert.ok(savedFile.includes("「行こう」\n　廊下を歩いた！　3メートル先だ。"))
     // 同じ内容を繰り返し保存しても before-fix の控えが重複生成されない
-    const repeatOut = await novelSaveChapterExecute({ chapterNumber: 1, title: "テスト", content: dirtyBody }, ctx)
+    const repeatOut = await novelSaveChapterExecute({ chapterNumber: 1, title: "テスト", content: dirtyBody, autoFix: true }, ctx)
     assert.ok(repeatOut.includes("前に保存した内容と同じでした"))
     assert.ok(!repeatOut.includes("整形前の本文を残しました"))
     const beforeFixDrafts = readdirSync(join(dir, ".novel/drafts")).filter((f) => f.includes("before-fix"))
     assert.equal(beforeFixDrafts.length, 1)
 
-    // autoFix: false で未整形のまま保存したあと、novel_check(fix: true) で自動修正＋旧稿退避できる
+    // 既定では未整形のまま保存したあと、novel_check(fix: true) で自動修正＋旧稿退避できる
     const unfixedOut = await novelSaveChapterExecute(
-      { chapterNumber: 2, title: "未整形", content: "「閉じてない\n「行く。」", autoFix: false },
+      { chapterNumber: 2, title: "未整形", content: "「閉じてない\n「行く。」" },
       ctx,
     )
     assert.ok(unfixedOut.includes("❌ 規約違反"))
+    assert.ok(!unfixedOut.includes("自動整形しました"))
+    assert.ok(readFileSync(join(dir, ".novel/chapters/chapter-002.md"), "utf-8").includes("「行く。」"))
     const fixOut = await novelCheckExecute({ chapterNumber: 2, fix: true }, ctx)
     assert.ok(fixOut.includes("✨ 表記を自動修正しました"))
     assert.ok(fixOut.includes("旧稿は .novel/drafts/ に残しました"))

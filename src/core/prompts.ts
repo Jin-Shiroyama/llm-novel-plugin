@@ -17,7 +17,7 @@ function fillTemplate(template: string, vars: Record<string, string>): string {
 const WRITING_STYLE_CORE = `✅ 感情のラベルやできあいの定型句に頼らず、キャラ固有の動作・台詞・語り手の声で書く
 ✅ 話の終わりを道徳的な教訓や感動まとめで締めず、やり取り・余韻・引き・オチで切る
 ✅ キャラごとに口調と語彙を書き分け、設定は場面や会話の中で自然に見せる
-✅ 表記規約と反AI基準は novel-writing skill に従う（保存時に機械修正可能な表記は自動整形される）`
+✅ 表記規約と反AI基準は novel-writing skill に従う（保存時は点検のみ。自動整形は autoFix: true を明示した場合だけ）`
 
 // ============================================================
 // 企画書（concept）

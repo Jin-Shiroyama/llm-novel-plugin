@@ -15,7 +15,9 @@ description: "ライトノベル・Web小説を書くための正本 skill。表
 
 ---
 
-## 一、表記規約（機械点検 `novel_check`・保存時自動整形の基準）
+## 一、表記規約（機械点検 `novel_check`・明示的な自動整形の基準）
+
+保存時の自動整形は既定 OFF です。`novel_save_chapter(autoFix: true)` または `novel_check(fix: true)` を明示したときだけ整形します。URL と日本語が続いて境界が曖昧な場合は保持して通知します。URL は `<https://example.com/検索?q=1>` のように囲むと範囲が明確になります。
 
 > 会話末の句点・半角 `!?`・感嘆符後ろの空白・全角数字・三点リーダやダッシュ・字下げは、`novel_save_chapter` 保存時に自動で整形され、変更箇所と整形前バックアップ（`.novel/drafts/`）が残ります（既存ファイルも `novel_check(fix: true)` で一括整形可）。罫線枠・URL・括弧の閉じ忘れ・ルビ記法ミス・長音符 `ーー`・確認どまり（⚠️：`ascii-space` や用語集の禁止表記など）は自動変更しません。
 

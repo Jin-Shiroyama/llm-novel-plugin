@@ -11,6 +11,12 @@ A light-novel & Japanese web-novel writing plugin for LLM harnesses (OpenCode-fi
 - **Battle-tested core engine**: Event-sourced per-episode character state diffs, speech-profile tracking (first-person / address terms / politeness), Japanese typography & anti-AI / preachy-ending linter, glossary consistency checks, Kakuyomu / Narou / pixiv ruby conversion, split episode exporter, and dedicated fan-fiction canon management (`.novel/canon/`).
 - **Harness-agnostic core**: All tool executors in `src/tools/` accept only `{ projectDir: string }`, keeping OpenCode coupling isolated inside `src/adapters/opencode/` for straightforward future MCP server support.
 
+## Character names and formatting
+
+Character matching uses filenames, explicitly separated names, and aliases written in character sheets. Fill in the aliases field; surname boundaries are no longer guessed. Ambiguous aliases cannot update character state. Existing unambiguous aliases are resolved in memory before replaying state changes.
+
+Saving now checks typography without changing the manuscript by default. Use `novel_save_chapter(autoFix: true)` or `novel_check(fix: true)` to apply safe fixes explicitly. Ruby readings and emphasis boundaries are preserved; ambiguous URL boundaries are reported for manual clarification.
+
 ## Development
 
 ```bash

@@ -30,7 +30,7 @@ export interface SaveChapterArgs {
   title: string
   content: string
   updateState?: boolean
-  /** 機械的に直せる表記を保存時に自動整形するかどうか。既定 true */
+  /** 機械的に直せる表記を保存時に自動整形するかどうか。既定 false */
   autoFix?: boolean
 }
 
@@ -57,7 +57,7 @@ export async function novelSaveChapterExecute(
   const filePath = join(chaptersDir, fileName)
 
   const rawBody = stripChapterHeading(args.content)
-  const autoFix = args.autoFix !== false
+  const autoFix = args.autoFix === true
   const fixResult = autoFix ? fixTypography(rawBody, { indent }) : null
   const body = fixResult ? fixResult.text : rawBody
   const title = normalizeChapterTitle(args.title)
@@ -91,7 +91,7 @@ export async function novelSaveChapterExecute(
       header + rawBody,
     )
   }
-  await safeWriteFile(filePath, saved)
+  if (!sameAsPrevious) await safeWriteFile(filePath, saved)
 
   const wordCount = countWords(body)
 

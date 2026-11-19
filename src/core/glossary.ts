@@ -116,7 +116,7 @@ export function parseGlossary(content: string): GlossaryEntry[] {
 
 /**
  * 用語をプロット・シーンと照らす手がかり。用語・読み・使わない表記。
- * 1文字のものは漢字のときだけ使う（仮名1文字はほとんどの文に当たる。characterNameKeys と同じ扱い）。
+ * 1文字のものは漢字のときだけ使う（仮名1文字はほとんどの文に当たる）。
  */
 export function glossaryKeys(entry: GlossaryEntry): string[] {
   const keys = [entry.term, entry.reading ?? "", ...entry.avoid].map((k) => k.trim())

@@ -11,7 +11,6 @@ import {
   readDocParts,
   readChapterDoc,
   listCharacterDocs,
-  selectCharacterDocs,
   parseScenes,
   clipDocParts,
   selectForeshadowReminders,
@@ -24,7 +23,6 @@ import {
   seriousnessLabel,
   indentStyleOf,
   recommendedGenreSkills,
-  characterNameKeys,
 } from "../core/utils.js"
 import type {
   NovelConfig,
@@ -68,10 +66,12 @@ import {
 import type { ManuscriptSection, SectionKind } from "../core/sections.js"
 import { worldBuildingParts, conceptParts } from "../core/doc-sections.js"
 import { parseGlossary, buildGlossaryContext } from "../core/glossary.js"
-import { statesBefore, lastRecordedBefore, stateKeyNames, formatStateKeyNames } from "../core/character-state.js"
+import { statesBefore, lastRecordedBefore, stateKeyNames, formatStateKeyNames, normalizeCharacterState } from "../core/character-state.js"
 import type { ResolvedCharacter } from "../core/character-state.js"
 import { sourceWorkOf, readCanonParts } from "../core/canon.js"
 import type { LimitKey, Seriousness, ChapterUnit } from "../core/constants.js"
+import { buildCharacterIndex, characterRanks, resolveCharacterName } from "../core/character-names.js"
+import type { CharacterIndex } from "../core/character-names.js"
 import type { ToolRuntimeContext } from "./types.js"
 
 export interface ContextArgs {
@@ -204,31 +204,42 @@ export async function novelContextExecute(
 
   const chapterText = [chapterOutline ?? "", shortBrief ?? "", ...sceneParts.map((p) => p.content)].join("\n")
 
-  // --- 登場人物（P1） ---
-  const profileParts = (await readDocParts(dir, "characters/profiles.md", null)).map((p) => ({
-    ...p,
-    label: "一覧・関係性（profiles.md）",
-  }))
+  // 人物選択に使う資料を先にそろえる。前話末尾も同じ索引で照合する。
+  const prev = previousManuscriptFile(manuscriptFiles, section)
+  const prevText = prev ? await safeReadFile(prev.path) : null
+  const tail = prevText ? takeTailChars(prevText, resolveLimit(config, "previousChapterTail")) : ""
   const allCharacterDocs = await listCharacterDocs(dir)
-  const relevantDocs = selectCharacterDocs(allCharacterDocs, chapterText)
+  const index = buildCharacterIndex(allCharacterDocs)
+  const charState = await readCharacterStateRecord(getDocPath(dir, "character-state"))
+  const normalized = charState.kind === "ok" ? normalizeCharacterState(charState.value, index) : null
+  const states = normalized ? statesBefore(normalized.file, section) : []
+  // シート未登録の記録名も、その名前そのものだけを文章から探す。曖昧な呼称は追加しない。
+  const stateIndex = [...index, ...states.filter(c => resolveCharacterName(index, c.name).kind === "unknown")
+    .map(c => ({ name: c.name, hints: [c.name] }))]
+  const ranks = characterRanks(stateIndex, chapterText, tail)
+  const relevantDocs = allCharacterDocs.filter(d => ranks.has(d.label))
+    .sort((a, b) => ranks.get(a.label)! - ranks.get(b.label)!)
+  const profileParts = (await readDocParts(dir, "characters/profiles.md", null)).map(p => ({
+    ...p, label: "一覧・関係性（profiles.md）", rank: 4,
+  }))
   const characterParts = [
+    ...relevantDocs.map(d => ({ ...d, label: d.canon ? `${d.label}（原作の人物）` : d.label, content: d.canon ? `（原作の人物）\n${d.content}` : d.content, rank: ranks.get(d.label) })),
     ...profileParts,
-    ...relevantDocs.map((d) => (d.canon ? { ...d, label: `${d.label}（原作の人物）` } : d)),
   ]
-  if (characterParts.length > 0) {
+  if (allCharacterDocs.length > 0 || characterParts.length > 0) {
     context += `## 👤 登場人物 (P1 — キャラ立ちと掛け合い)\n`
-    if (allCharacterDocs.length > 0 && relevantDocs.length < allCharacterDocs.length) {
-      const names = relevantDocs.map((d) => d.label).join("、")
-      context += `（この${unit}に関わる人物の設定を載せています: ${names}）\n`
+    if (relevantDocs.length > 0) {
+      context += `（この${unit}に関わる人物の設定を載せています: ${[...new Set(relevantDocs.map(d => d.label))].join("、")}。当話のプロット・シーン、前の節の末尾の順）\n`
+    } else if (index.length > 0) {
+      const [names] = truncateChars(index.map(c => c.name).join("、"), resolveLimit(config, "characterProfiles"))
+      context += `⚠️ 人物を特定できませんでした。プロットの登場人物名とシートの呼称を確認してください。\n人物一覧: ${names}\n`
     }
     context += clipParts(characterParts, "characterProfiles") + "\n\n"
   }
-
-  const charState = await readCharacterStateRecord(getDocPath(dir, "character-state"))
-  const states = charState.kind === "ok" ? statesBefore(charState.value, section) : []
+  for (const warning of normalized?.warnings ?? []) context += `⚠️ 人物名の記録: ${warning}\n`
 
   // --- ことばづかい（P1） ---
-  const speech = buildSpeechContext(allCharacterDocs, relevantDocs, states, chapterText, unit)
+  const speech = buildSpeechContext(index, relevantDocs, states, ranks, unit)
   if (speech) {
     const limit = resolveLimit(config, "speech")
     const [body, truncated] = truncateChars(speech, limit)
@@ -246,7 +257,7 @@ export async function novelContextExecute(
   } else if (states.length > 0 && charState.kind === "ok") {
     const asOf = lastRecordedBefore(charState.value, section)
     context += `## 🔄 登場人物の現在の状態（${asOf ? `${sectionLabel(asOf, unit)}の終わり時点` : "記録より"}） (P1 — 重要)\n`
-    context += buildCharacterStateContext(states, allCharacterDocs, relevantDocs, chapterText, resolveLimit(config, "characterState"), unit)
+    context += buildCharacterStateContext(states, ranks, resolveLimit(config, "characterState"), unit)
     context += "\n\n"
   }
   const keyNames = charState.kind === "ok" ? formatStateKeyNames(stateKeyNames(charState.value)) : ""
@@ -255,11 +266,8 @@ export async function novelContextExecute(
   }
 
   // --- 前の話の末尾（P1） ---
-  const prev = previousManuscriptFile(manuscriptFiles, section)
-  const prevText = prev ? await safeReadFile(prev.path) : null
   if (prev && prevText) {
     const limit = resolveLimit(config, "previousChapterTail")
-    const tail = takeTailChars(prevText, limit)
     const prevName = prev.section.kind === "chapter" ? `前の${unit}` : `前の${sectionLabel(prev.section, unit)}`
     context += `## 📖 ${prevName}の末尾${limit.toLocaleString("ja-JP")}文字 (P1 — つなぎ)\n${tail}\n\n`
   }
@@ -381,38 +389,16 @@ export async function novelContextExecute(
   return context
 }
 
-function docMatchesName(doc: CharacterDoc, name: string): boolean {
-  if (doc.label === name || doc.aliases.includes(name)) return true
-  const keys = characterNameKeys(doc.label, doc.aliases)
-  if (keys.strong.includes(name) || keys.weak.includes(name)) return true
-  return characterNameKeys(name).strong.includes(doc.label)
-}
-
-function statesInText(states: ResolvedCharacter[], allDocs: CharacterDoc[], text: string): Set<string> {
-  const keyed = states.map((c) => {
-    const aliases = allDocs.filter((d) => docMatchesName(d, c.name)).flatMap((d) => [d.label, ...d.aliases])
-    return { name: c.name, keys: characterNameKeys(c.name, aliases) }
-  })
-  const hit = new Set<string>()
-  for (const { name, keys } of keyed) if (keys.strong.some((k) => text.includes(k))) hit.add(name)
-  for (const { name, keys } of keyed) if (!hit.has(name) && keys.weak.some((k) => text.includes(k))) hit.add(name)
-  return hit
-}
-
 const charCount = (text: string) => [...text].length
 const STATUS_LABELS: Record<string, string> = { deceased: "死亡", missing: "行方不明", retired: "退場" }
 const RECENT_EVENTS = 5
 
 function buildCharacterStateContext(
   states: ResolvedCharacter[],
-  allDocs: CharacterDoc[],
-  relevantDocs: CharacterDoc[],
-  chapterText: string,
+  ranks: Map<string, number>,
   limit: number,
   unit: ChapterUnit,
 ): string {
-  const hits = statesInText(states, allDocs, chapterText)
-  const relevant = (c: ResolvedCharacter) => hits.has(c.name) || relevantDocs.some((d) => docMatchesName(d, c.name))
   const statusMark = (c: ResolvedCharacter) => {
     if (c.status === "active") return ""
     const at = c.changedAt.status
@@ -421,9 +407,8 @@ function buildCharacterStateContext(
   const pairs = (map: Record<string, string>, sep: string) =>
     Object.entries(map).map(([k, v]) => `${k}${sep}${v}`).join(" ／ ")
 
-  const identified = chapterText.trim().length > 0 && states.some(relevant)
-  const main = identified ? states.filter(relevant) : states
-  const others = identified ? states.filter((c) => !relevant(c)) : []
+  const main = states.filter(c => ranks.has(c.name)).sort((a, b) => ranks.get(a.name)! - ranks.get(b.name)!)
+  const others = states.filter(c => !ranks.has(c.name))
   const blocks: Array<{ name: string; text: string }> = []
   for (const c of main) {
     const lines = [`**${c.name}**${statusMark(c)}`]
@@ -441,7 +426,7 @@ function buildCharacterStateContext(
     blocks.push({ name: c.name, text: lines.join("\n") })
   }
   if (others.length > 0) {
-    const heading = main.length > 0 ? "\n### ほかの人物（この話のプロットに名前が無い）" : ""
+    const heading = main.length > 0 ? "\n### ほかの人物（当話・前の節の末尾で未特定）" : ""
     others.forEach((c, i) => {
       const summary = [c.mentalState, c.attributes["現在地"]].filter(Boolean).join(" ／ ")
       const line = `- **${c.name}**${statusMark(c)}${summary ? `: ${summary}` : ""}`
@@ -474,29 +459,28 @@ function buildCharacterStateContext(
 }
 
 function buildSpeechContext(
-  allDocs: CharacterDoc[],
+  index: CharacterIndex,
   relevantDocs: CharacterDoc[],
   states: ResolvedCharacter[],
-  chapterText: string,
+  ranks: Map<string, number>,
   unit: ChapterUnit,
 ): string {
-  const matches = docMatchesName
-  const hits = statesInText(states, allDocs, chapterText)
 
   const entries: Array<{ name: string; profile: SpeechProfile; state?: ResolvedCharacter }> = []
   for (const doc of relevantDocs) {
     if (doc.canon && relevantDocs.some((d) => !d.canon && d.label === doc.label)) continue
-    const state = states.find((s) => matches(doc, s.name))
+    const state = states.find((s) => s.name === doc.label)
     const profile = extractSpeechProfile(doc.content) ?? { addressTerms: [] }
     entries.push({ name: doc.label, profile, state })
   }
   for (const state of states) {
     if (!state.firstPerson && Object.keys(state.addressTerms).length === 0) continue
-    if (allDocs.some((d) => matches(d, state.name))) continue
-    if (chapterText.trim().length > 0 && !hits.has(state.name)) continue
+    if (resolveCharacterName(index, state.name).kind !== "unknown") continue
+    if (!ranks.has(state.name)) continue
     entries.push({ name: state.name, profile: { addressTerms: [] }, state })
   }
 
+  entries.sort((a, b) => (ranks.get(a.name) ?? 4) - (ranks.get(b.name) ?? 4))
   const blocks: string[] = []
   for (const { name, profile, state } of entries) {
     const changed = (field: string) => {
@@ -512,7 +496,10 @@ function buildSpeechContext(
     if (profile.secondPerson) fields.push(`二人称: ${profile.secondPerson}`)
     if (profile.politeness) fields.push(`丁寧さ: ${profile.politeness}`)
 
-    const rows = profile.addressTerms.map((r) => ({ ...r, mark: "" }))
+    const rows = profile.addressTerms.map((r) => {
+      const target = resolveCharacterName(index, r.target)
+      return { ...r, target: target.kind === "resolved" ? target.name : r.target, mark: "" }
+    })
     for (const [target, term] of Object.entries(state?.addressTerms ?? {})) {
       const row = rows.find((r) => r.target === target)
       if (!row) rows.push({ target, term, mark: changed(`addressTerms.${target}`) })

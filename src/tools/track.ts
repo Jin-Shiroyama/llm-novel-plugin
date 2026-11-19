@@ -10,6 +10,7 @@ import {
   listMarkdownFiles,
   chapterNumberFromFileName,
   chapterTitleFromHeading,
+  listCharacterDocs,
 } from "../core/utils.js"
 import type { ForeshadowEntry, NovelConfig } from "../core/utils.js"
 import { DEFAULTS } from "../core/constants.js"
@@ -43,6 +44,8 @@ import {
 import type { SummarySection, RecordFile } from "../core/records.js"
 import {
   applySectionUpdates,
+  normalizeCharacterUpdates,
+  normalizeCharacterState,
   describeStateChange,
   emptyCharacterStateFile,
   recordedNames,
@@ -52,6 +55,7 @@ import {
   formatStateKeyNames,
 } from "../core/character-state.js"
 import type { CharacterStateFile } from "../core/character-state.js"
+import { buildCharacterIndex } from "../core/character-names.js"
 import type { ToolRuntimeContext } from "./types.js"
 
 export interface UpdateArgs {
@@ -124,18 +128,23 @@ async function updateCharacterState(
   const current = await readCharacterStateRecord(filePath)
   if (current.kind === "broken") return refuseBroken("登場人物の状態", ".novel/characters/state.json", current)
   const file: CharacterStateFile = current.kind === "ok" ? current.value : emptyCharacterStateFile()
+  const index = buildCharacterIndex(await listCharacterDocs(dir))
+  const incomingNames = normalizeCharacterUpdates(parsed.value.updates, index)
+  if (incomingNames.problems.length > 0) return `❌ 登場人物の状態は更新していません。\n${incomingNames.problems.join("\n")}`
+  const normalized = normalizeCharacterState(file, index)
+  const updates = incomingNames.updates
 
   const key = sectionKey(target)
   const label = sectionLabel(target, unit)
   const existed = key in file.sections
   const next: CharacterStateFile = {
     ...file,
-    sections: { ...file.sections, [key]: applySectionUpdates(file.sections[key], parsed.value.updates, parsed.value.replace ?? false) },
+    sections: { ...file.sections, [key]: applySectionUpdates(normalized.file.sections[key], updates, parsed.value.replace ?? false) },
   }
 
-  const before = statesThrough(file, target)
-  const after = statesThrough(next, target)
-  const names = [...new Set([...parsed.value.updates.map((u) => u.name), ...before.map((c) => c.name), ...after.map((c) => c.name)])]
+  const before = statesThrough(normalized.file, target)
+  const after = statesThrough(normalizeCharacterState(next, index).file, target)
+  const names = [...new Set([...updates.map((u) => u.name), ...before.map((c) => c.name), ...after.map((c) => c.name)])]
   const lines: string[] = []
   let added = 0
   let changed = 0
@@ -144,7 +153,7 @@ async function updateCharacterState(
     const b = before.find((c) => c.name === name)
     const a = after.find((c) => c.name === name)
     const applied = describeStateChange(b, a, target)
-    const requested = parsed.value.updates.some((u) => u.name === name)
+    const requested = updates.some((u) => u.name === name)
     if (applied.length === 0) {
       if (requested) {
         unchanged++
@@ -168,11 +177,13 @@ ${lines.join("\n")}`.trimEnd()
   }
 
   await safeWriteJson(filePath, next)
-  const total = statesThrough(next, target).length
+  const total = after.length
   let report = added === 0 && changed === 0
     ? `✅ ${label}の人物の状態を記録しました（状態の変化はありません。${label}まで登場 ${total}人）`
     : `✅ ${label}の人物の状態を更新しました（新規 ${added}人 / 更新 ${changed}人 / 変更なし ${unchanged}人 / ${label}まで登場 ${total}人）`
   if (lines.length > 0) report += `\n${lines.join("\n")}`
+  for (const notice of incomingNames.notices) report += `\nℹ️ ${notice}`
+  for (const warning of normalized.warnings) report += `\n⚠️ ${warning}`
   const later = recordedSections(next).filter((r) => compareSections(r.section, target) > 0)
   if (later.length > 0) {
     report += `\n💡 ${sectionLabel(later[0].section, unit)}以降の記録があります。この変化は、それより後の${unit}・節の資料にも反映されます。`
@@ -319,7 +330,8 @@ async function getUpdatePrompt(dir: string, promptType: string, chapterNumber?: 
 
   const config = await safeReadJson<NovelConfig>(getConfigPath(dir))
   const state = await readCharacterStateRecord(getDocPath(dir, "character-state"))
-  const names = state.kind === "ok" ? recordedNames(state.value) : []
+  const index = buildCharacterIndex(await listCharacterDocs(dir))
+  const names = state.kind === "ok" ? recordedNames(normalizeCharacterState(state.value, index).file) : []
   const keyNames = state.kind === "ok" ? formatStateKeyNames(stateKeyNames(state.value)) : ""
   const vars = buildPromptVars(config, {
     chapterNumber,

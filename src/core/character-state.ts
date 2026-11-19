@@ -15,6 +15,68 @@
 import { compareSections, sectionFromKey } from "./sections.js"
 import type { ManuscriptSection } from "./sections.js"
 import type { CharacterChanges, CharacterUpdate } from "./records.js"
+import { resolveCharacterName } from "./character-names.js"
+import type { CharacterIndex } from "./character-names.js"
+
+/** 書き込み側は problems があればバッチ全体を拒否する。読み込み側は曖昧な名前を残して通知する。 */
+export function normalizeCharacterUpdates(updates: CharacterUpdate[], index: CharacterIndex): {
+  updates: CharacterUpdate[]; problems: string[]; notices: string[]
+} {
+  const problems = new Set<string>()
+  const notices = new Set<string>()
+  const resolve = (input: string, owner = false) => {
+    if (!input.trim()) {
+      problems.add("人物名・相手キーを空白だけにすることはできません")
+      return input
+    }
+    const result = resolveCharacterName(index, input)
+    if (result.kind === "ambiguous") {
+      problems.add(`「${input}」は曖昧です（候補: ${result.candidates.join("、")}）。正式名で指定してください`)
+      return input
+    }
+    if (result.kind === "resolved" && result.name !== input) notices.add(`「${input}」を「${result.name}」として記録しました`)
+    if (owner && result.kind === "unknown") notices.add(`「${result.name}」はシート未登録の人物として扱います`)
+    return result.name
+  }
+  const mapTargets = (map: Record<string, string | null> | undefined) => {
+    if (!map) return undefined
+    const out: Record<string, string | null> = {}
+    for (const [input, value] of Object.entries(map)) {
+      const name = resolve(input)
+      if (Object.hasOwn(out, name) && out[name] !== value) problems.add(`「${name}」を指す複数の相手キーに異なる値があります。正式名のキー1つにまとめてください`)
+      Object.defineProperty(out, name, { value, enumerable: true, configurable: true, writable: true })
+    }
+    return out
+  }
+  return {
+    updates: updates.map(u => ({
+      name: resolve(u.name, true),
+      changes: {
+        ...u.changes,
+        ...(u.changes.relationships ? { relationships: mapTargets(u.changes.relationships) } : {}),
+        ...(u.changes.speech ? { speech: {
+          ...u.changes.speech,
+          ...(u.changes.speech.addressTerms ? { addressTerms: mapTargets(u.changes.speech.addressTerms) } : {}),
+        } } : {}),
+      },
+    })),
+    problems: [...problems],
+    notices: [...notices],
+  }
+}
+
+/** 差分の順序を保って名前を解決する。元ファイル・元オブジェクトは変更しない。 */
+export function normalizeCharacterState(file: CharacterStateFile, index: CharacterIndex): {
+  file: CharacterStateFile; warnings: string[]
+} {
+  const warnings = new Set<string>()
+  const sections = Object.fromEntries(Object.entries(file.sections).map(([key, section]) => {
+    const normalized = normalizeCharacterUpdates(section.updates, index)
+    for (const warning of normalized.problems) warnings.add(`${key}: ${warning}`)
+    return [key, { updates: normalized.updates }]
+  }))
+  return { file: { sections }, warnings: [...warnings] }
+}
 
 export interface CharacterStateSection {
   updates: CharacterUpdate[]
@@ -238,8 +300,9 @@ export function applySectionUpdates(
   updates: CharacterUpdate[],
   replace: boolean,
 ): CharacterStateSection {
-  const entries: CharacterUpdate[] = replace ? [] : (current?.updates ?? []).map((u) => ({ name: u.name, changes: u.changes }))
-  for (const { name, changes } of updates) {
+  const entries: CharacterUpdate[] = []
+  // 旧記録の別名が同じ正式名へ解決された場合も、後続の更新より先に順番どおり重ねる。
+  for (const { name, changes } of [...(replace ? [] : current?.updates ?? []), ...updates]) {
     // 中身の無い欄を外した結果、変化が残らなかった人物は記録に入れない（compactChanges）
     if (Object.keys(changes).length === 0) continue
     const existing = entries.find((e) => e.name === name)

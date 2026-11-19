@@ -183,6 +183,8 @@ export interface DocPart {
   content: string
   /** 文字数の枠を先に確保する */
   priority?: boolean
+  /** 小さい順に文字数を配分する。指定が無い場合は priority に従う。 */
+  rank?: number
 }
 
 /** ディレクトリを再帰的にたどり、.md のパスを集める（深さは3階層まで） */
@@ -397,13 +399,13 @@ export function isPlaceholderValue(value: string): boolean {
 }
 
 /** キャラクターシートから呼称・別名を読み取る */
-const ALIAS_LINE = /(?:呼称|別名|通称|愛称|あだ名)[^：:\n]{0,6}[：:]\s*(.+)/
+const ALIAS_LINE = /^\s*(?:[-*・]\s*)?(?:\*\*)?(?:呼称|別名|通称|愛称|あだ名)(?:\*\*)?\s*[：:]\s*(.+)/
 export function extractNameAliases(content: string): string[] {
   const out: string[] = []
   for (const line of content.split("\n")) {
     const m = line.match(ALIAS_LINE)
     if (!m || isPlaceholderValue(m[1])) continue
-    for (const piece of m[1].split(/[、,\uFF0C・\/\s\u3000]+/)) {
+    for (const piece of m[1].split(/[、,\uFF0C\/]+/)) {
       const t = piece.replace(/[*`「」『』（）()\[\]]/g, "").trim()
       if (t.length >= 1) out.push(t)
     }
@@ -469,88 +471,7 @@ export function extractSpeechProfile(content: string): SpeechProfile | null {
   return filled ? profile : null
 }
 
-/** 人物名から照合用の手がかりを作る（strong: 2文字以上、weak: 1文字漢字または明示された1文字呼称） */
-export function characterNameKeys(name: string, aliases: string[] = []): { strong: string[]; weak: string[] } {
-  const strong = new Set<string>()
-  const weak = new Set<string>()
-  const trimmed = name.trim()
-  if (trimmed.length === 0) return { strong: [], weak: [] }
-
-  const add = (k: string) => {
-    const t = k.trim()
-    if (t.length === 0) return
-    if ([...t].length === 1) weak.add(t)
-    else strong.add(t)
-  }
-
-  add(trimmed)
-  const pieces = trimmed.split(/[\s\u3000・]+/).filter((p) => p.length > 0)
-  for (const piece of pieces) add(piece)
-
-  // スペースや中黒が無い氏名だけ、姓・名の候補を自動抽出する。
-  // カタカナ・ひらがな単独名（「ミナト」「アリス」等）は途中分割しない（愛称は aliases 欄で登録）。
-  if (pieces.length === 1) {
-    const chars = [...trimmed]
-    const isHan = (c: string) => /^\p{Script=Han}$/u.test(c)
-    if (chars.length >= 2 && chars.every(isHan)) {
-      if (chars.length === 2) {
-        // 2字（1+1）
-        add(chars[0])
-        add(chars[1])
-      } else if (chars.length === 3) {
-        // 3字（2+1 または 1+2）
-        add(chars.slice(0, 2).join(""))
-        add(chars[2])
-        add(chars[0])
-        add(chars.slice(1).join(""))
-      } else if (chars.length === 4) {
-        // 4字（2+2 のみ。3字切りや1字切りの「真」等による誤爆を避ける）
-        add(chars.slice(0, 2).join(""))
-        add(chars.slice(2).join(""))
-      } else {
-        // 5字以上（2字または3字の姓・名候補。1字切りはしない）
-        add(chars.slice(0, 2).join(""))
-        add(chars.slice(0, 3).join(""))
-        add(chars.slice(-2).join(""))
-        add(chars.slice(-3).join(""))
-      }
-    } else {
-      // 漢字の姓＋仮名の名（例: 白瀬しおり、星野アイ）は境目で 2 分割する
-      const hanKana = trimmed.match(/^(\p{Script=Han}{1,3})([\p{Script=Hiragana}\p{Script=Katakana}]{2,})$/u)
-      if (hanKana) {
-        add(hanKana[1])
-        add(hanKana[2])
-      }
-    }
-  }
-
-  for (const a of aliases) add(a)
-
-  return { strong: [...strong], weak: [...weak] }
-}
-
-/** この話に出るキャラクターシートを二段照合で選ぶ */
-export function selectCharacterDocs<T extends DocPart & { aliases?: string[] }>(
-  docs: T[],
-  haystack: string,
-): T[] {
-  if (docs.length === 0) return []
-  if (haystack.trim().length === 0) return docs
-
-  const keyed = docs.map((d) => ({ doc: d, keys: characterNameKeys(d.label, d.aliases ?? []) }))
-  const hit = new Set<T>()
-
-  for (const { doc, keys } of keyed) {
-    if (keys.strong.some((k) => haystack.includes(k))) hit.add(doc)
-  }
-  for (const { doc, keys } of keyed) {
-    if (hit.has(doc)) continue
-    if (keys.weak.some((k) => haystack.includes(k))) hit.add(doc)
-  }
-
-  if (hit.size === 0) return docs
-  return docs.filter((d) => hit.has(d))
-}
+export { characterNameKeys, selectCharacterDocs } from "./character-names.js"
 
 // ============================================================
 // 文字数の枠の配分
@@ -623,7 +544,8 @@ export function allocateCharBudget(
 export function clipDocParts(parts: DocPart[], limit: number): string {
   if (parts.length === 0) return ""
 
-  const ordered = [...parts.filter((p) => p.priority), ...parts.filter((p) => !p.priority)]
+  const rank = (p: DocPart) => p.rank ?? (p.priority ? 0 : 1)
+  const ordered = [...parts].sort((a, b) => rank(a) - rank(b))
   const bodies = ordered.map((p) => p.content.trim())
   const sizes = bodies.map((b) => [...b].length)
   const showLabels = ordered.length > 1
@@ -633,7 +555,13 @@ export function clipDocParts(parts: DocPart[], limit: number): string {
     return ordered.map((_, i) => label(i) + bodies[i]).join("\n\n")
   }
 
-  const alloc = allocateCharBudget(sizes, limit, ordered.map((p) => Boolean(p.priority)))
+  const alloc = sizes.map(() => 0)
+  let remaining = limit
+  for (const tier of [...new Set(ordered.map(rank))]) {
+    const indices = ordered.map((p, i) => rank(p) === tier ? i : -1).filter(i => i >= 0)
+    const shares = fairAllocate(indices.map(i => sizes[i]), remaining)
+    indices.forEach((i, k) => { alloc[i] = shares[k]; remaining -= shares[k] })
+  }
   const out: string[] = []
   for (let i = 0; i < ordered.length; i++) {
     if (alloc[i] <= 0) {

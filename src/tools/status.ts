@@ -28,6 +28,7 @@ import {
   sceneChapterNumber,
   toKanjiNumber,
   resolveLimit,
+  listCharacterDocs,
 } from "../core/utils.js"
 import type { NovelConfig, Phase } from "../core/utils.js"
 import {
@@ -56,6 +57,8 @@ import { sourceWorkOf, hasCanonOverview } from "../core/canon.js"
 import { parsePublishInfo, describePublishInfo, publishIssues } from "../core/publish.js"
 import { DEFAULTS } from "../core/constants.js"
 import { CONCEPT_TEMPLATE, WORLD_BUILDING_TEMPLATE, CHARACTER_PROFILES_TEMPLATE } from "../core/templates.js"
+import { buildCharacterIndex } from "../core/character-names.js"
+import { normalizeCharacterState } from "../core/character-state.js"
 import type { ToolRuntimeContext } from "./types.js"
 
 export interface StatusArgs {
@@ -264,6 +267,10 @@ export async function novelStatusExecute(
   }
 
   const issues: string[] = []
+  const characterDocs = await listCharacterDocs(dir)
+  const index = buildCharacterIndex(characterDocs)
+  const missingAliases = index.filter(c => !characterDocs.some(d => d.label === c.name && d.aliases.length > 0))
+  if (missingAliases.length > 0) issues.push(`呼称が未記入の人物: ${missingAliases.map(c => c.name).join("、")}。シートの呼称欄に、本文で使う姓・名・あだ名を記入してください`)
   const foreshadowRecord = await readForeshadowRecord(getDocPath(dir, "foreshadow"))
   const { valid: foreshadowItems, invalid: brokenForeshadow } = splitForeshadowEntries(
     foreshadowRecord.kind === "ok" ? foreshadowRecord.value.items : [],
@@ -280,6 +287,7 @@ export async function novelStatusExecute(
   }
 
   const stateRecord = await readCharacterStateRecord(getDocPath(dir, "character-state"))
+  if (stateRecord.kind === "ok") issues.push(...normalizeCharacterState(stateRecord.value, index).warnings)
   if (stateRecord.kind === "broken") {
     issues.push(`${describeBrokenRecord(".novel/characters/state.json", stateRecord)}。直すまで人物の状態の更新はできません`)
   }

@@ -92,14 +92,14 @@ export function createOpenCodePlugin(pluginRoot: string): Plugin {
         }),
 
         novel_save_chapter: tool({
-          description: `書き上げた1話を chapters ディレクトリに保存する。連番付け・文字数と目安（±15%）の比較・旧稿の .novel/drafts/ 退避・表記の自動整形（既定 ON）と点検を自動で行う。
+          description: `書き上げた1話を chapters ディレクトリに保存する。連番付け・文字数と目安（±15%）の比較・旧稿の .novel/drafts/ 退避・表記の点検を行う。自動整形は autoFix: true のときだけ行う（既定 OFF）。
 プロローグ・幕間・エピローグは section で指定する。`,
           args: {
             ...sectionArgs("保存する"),
             title: z.string().describe("サブタイトル（話タイトル）"),
             content: z.string().describe("本文。見出し行は含めない"),
             updateState: z.boolean().optional().describe("保存後に記録更新の案内を出すかどうか。既定 true"),
-            autoFix: z.boolean().optional().describe("機械的に直せる表記（会話末の句点・半角!?・字下げなど）を保存時に自動整形するかどうか。既定 true"),
+            autoFix: z.boolean().optional().describe("機械的に直せる表記（会話末の句点・半角!?・字下げなど）を保存時に自動整形するかどうか。既定 false"),
           },
           async execute(args, context) {
             return novelSaveChapterExecute(args as any, { projectDir: context.directory })

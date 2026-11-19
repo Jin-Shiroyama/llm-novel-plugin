@@ -60,6 +60,7 @@ describe("スキル構成と作例品質（checkTypography / checkProse）", () 
           `${name} の作例 #${idx + 1} に文章警告: ${JSON.stringify(proseIssues)}`,
         )
         const fixed = fixTypography(block)
+        assert.equal(fixed.text, block, `${name} の作例 #${idx + 1} の本文を保持する`)
         assert.equal(
           fixed.totalFixes,
           0,

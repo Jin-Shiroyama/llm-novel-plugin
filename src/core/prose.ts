@@ -14,8 +14,8 @@
  * （「つまり」「要するに」「まだ知らなかった」など）は過剰検出しない。
  */
 
-import { stripRubyLine } from "./ruby.js"
-import { excerptAt, isNarrationLine, isSeparatorLine } from "./typography.js"
+import { analyzeManuscriptLine } from "./text-analysis.js"
+import { excerptAt, isSeparatorLine } from "./typography.js"
 
 export type ProseRule = "stock-phrase" | "preachy-ending" | "repeated-ending" | "long-sentence"
 
@@ -264,9 +264,10 @@ export function checkProse(text: string): ProseIssue[] {
   lines.forEach((line, i) => {
     if (line.trim().length === 0) return
     const original = [...line]
-    const { chars, columns } = stripRubyLine(line)
+    const analysis = analyzeManuscriptLine(line)
+    const { chars, columns } = analysis
     const at = (column: number) => (column < columns.length ? columns[column] : original.length)
-    if (!isNarrationLine(chars)) {
+    if (analysis.kind !== "narration") {
       if (isSeparatorLine(line) || /^#/.test(line) || chars.length > 0) flushRun()
       return
     }
