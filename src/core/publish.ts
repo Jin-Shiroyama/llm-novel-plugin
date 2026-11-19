@@ -1,5 +1,5 @@
 /**
- * opencode-novel-plugin - 投稿用の情報（.novel/publish.md）
+ * llm-novel-plugin - 投稿用の情報（.novel/publish.md）
  *
  * 題・キャッチコピー・紹介文・タグを /novel-publish で作って置く文書。
  * モデルは文字数を数えるのが不得手で、「35文字以内」と頼んでも超えたものを出す。

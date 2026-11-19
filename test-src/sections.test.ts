@@ -72,7 +72,7 @@ describe("節のファイル名", () => {
 describe("読む順番と呼び名", () => {
   test("プロローグ → 章 → その章のあとの幕間 → 次の章 → エピローグ", () => {
     const sorted = [EPILOGUE, ch(2), il(1, 2), ch(1), il(1), PROLOGUE].sort(compareSections)
-    assert.deepEqual(sorted.map(sectionLabel), [
+    assert.deepEqual(sorted.map((s) => sectionLabel(s)), [
       "プロローグ", "第1章", "幕間（第1章のあと）", "幕間（第1章のあと・2）", "第2章", "エピローグ",
     ])
   })
@@ -143,7 +143,7 @@ describe("novel_save_chapter と節", () => {
       { section: "interlude", chapterNumber: 2, interludeIndex: 2, title: "", content: "　遠くで。" },
       ctx(dir),
     )
-    assert.match(il2, /✅ 幕間（第2章のあと・2）を保存しました/)
+    assert.match(il2, /✅ 幕間（第2話のあと・2）を保存しました/)
     assert.match(il2, /⚠️ 第2話の本文はまだありません/)
     assert.equal(readFileSync(join(dir, ".novel", "chapters", "interlude-002-2.md"), "utf-8"), "# 幕間\n\n　遠くで。")
   })
@@ -199,7 +199,7 @@ describe("novel_status と節", () => {
     const order = ["prologue.md", "chapter-001.md", "interlude-001-1.md", "interlude-001-2.md", "chapter-002.md", "epilogue.md"]
     const positions = order.map((f) => out.indexOf(`📄 ${f}`))
     assert.ok(positions.every((p, i) => p >= 0 && (i === 0 || p > positions[i - 1])), out)
-    assert.match(out, /interlude-001-2\.md（幕間（第1章のあと・2））: 6文字/)
+    assert.match(out, /interlude-001-2\.md（幕間（第1話のあと・2））: 6文字/)
     // 本文以外のファイルとして挙げるのはメモだけ
     assert.match(out, /本文以外のファイルは数えていません: メモ\.md\n/)
     assert.notEqual(determinePhase(dir, JSON.parse(CONFIG)), "completed")
@@ -230,7 +230,7 @@ describe("novel_export と節", () => {
     const order = ["プロローグ　雨", "第1話　駅", "幕間　町", "幕間\n\n　犬", "第2話　傘", "エピローグ　晴れ"]
     const positions = order.map((h) => text.indexOf(h))
     assert.ok(positions.every((p, i) => p >= 0 && (i === 0 || p > positions[i - 1])), text)
-    assert.match(out, /📚 範囲: 第1〜2章（2話）＋プロローグ・幕間2・エピローグ/)
+    assert.match(out, /📚 範囲: 第1〜2話（2話）＋プロローグ・幕間2・エピローグ/)
     assert.match(out, /📊 文字数: 35文字/)
   })
 
@@ -289,7 +289,7 @@ describe("novel_context と節", () => {
   test("前の本文の末尾を、幕間やプロローグからも取る", async () => {
     const dir = sampleProject()
     const two = await novelContextExecute({ chapterNumber: 2, includePrompts: false }, ctx(dir))
-    assert.match(two, /## 📖 前の幕間（第1章のあと・2）の末尾[^\n]*\n[\s\S]*犬が吠える/)
+    assert.match(two, /## 📖 前の幕間（第1話のあと・2）の末尾[^\n]*\n[\s\S]*犬が吠える/)
     const one = await novelContextExecute({ chapterNumber: 1, includePrompts: false }, ctx(dir))
     assert.match(one, /## 📖 前のプロローグの末尾[^\n]*\n[\s\S]*雨が降っていた/)
     const epi = await novelContextExecute({ section: "epilogue", includePrompts: false }, ctx(dir))
@@ -390,7 +390,7 @@ describe("あらすじの節", () => {
     assert.match(out, /✅ あらすじを更新しました（プロローグ）/)
     assert.match(readFileSync(join(dir, ".novel", "summary.md"), "utf-8"), /## プロローグ 雨\n\n雨の夜。/)
     const status = await novelStatusExecute({}, ctx(dir))
-    assert.match(status, /あらすじの記録が無い節: 幕間（第1章のあと）、幕間（第1章のあと・2）、エピローグ/)
+    assert.match(status, /あらすじの記録が無い節: 幕間（第1話のあと）、幕間（第1話のあと・2）、エピローグ/)
   })
 
   test("伏線には節の記録用の章番号を使い、人物の状態は節のキーで残す", async () => {
@@ -464,10 +464,10 @@ describe("部（config.json の parts）", () => {
   test("進行状況と執筆用の資料に部を示す", async () => {
     const dir = withParts()
     const status = await novelStatusExecute({}, ctx(dir))
-    assert.match(status, /第1部「春」（第1章）: 1\/1話/)
-    assert.match(status, /第2部「夏」（第2〜3章）: 1\/2話/)
+    assert.match(status, /第1部「春」（第1話）: 1\/1話/)
+    assert.match(status, /第2部「夏」（第2〜3話）: 1\/2話/)
     const context = await novelContextExecute({ chapterNumber: 3, includePrompts: false }, ctx(dir))
-    assert.match(context, /部: 第2部「夏」（第2〜3章）の2話目/)
+    assert.match(context, /部: 第2部「夏」（第2〜3話）の2話目/)
 
     writeFileSync(join(dir, ".novel", "config.json"), JSON.stringify({ ...JSON.parse(CONFIG), parts: "春" }))
     assert.match(await novelStatusExecute({}, ctx(dir)), /⚠️ config\.json の parts は配列で/)

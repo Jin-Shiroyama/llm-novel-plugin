@@ -6,7 +6,7 @@ export function createNovelEditorAgent(): Record<string, unknown> {
     temperature: 0.15,
     permission: {
       edit: "allow",
-      bash: "allow",
+      bash: "deny",
       webfetch: "deny",
       question: "allow",
     },

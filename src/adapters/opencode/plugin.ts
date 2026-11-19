@@ -67,8 +67,8 @@ export function createOpenCodePlugin(pluginRoot: string): Plugin {
               .describe("舞台・設定ファイルの扱い。minimal（ラブコメ・日常・短編など世界観工程を省略）/ standard（world-building.md を作成）。省略時はジャンルと構成型から推定"),
             indent: z.enum(INDENT_STYLES).optional()
               .describe("段落頭の字下げ。fullwidth（既定・全角1字下げ）/ none（Web小説の字下げなし）"),
-            targetWords: z.number().optional().describe("目標総文字数。既定 90000（30話×3,000字）。短編の既定は 12000"),
-            chapterCount: z.number().optional().describe("予定話数。既定 30。短編の既定は 1"),
+            targetWords: z.number().int().positive().optional().describe("目標総文字数（1以上の整数）。既定 90000（30話×3,000字）。plot の既定は 100000、short の既定は 12000"),
+            chapterCount: z.number().int().positive().optional().describe("予定話数（1以上の整数）。既定 30。plot の既定は 35、short の既定は 1"),
             narrativePerspective: z.string().optional().describe("視点。既定「一人称」（三人称キャラ視点・三人称多元視点も可）"),
             chapterUnit: z.enum(CHAPTER_UNITS).optional().describe("書き出し時の単位の呼び名。既定「話」（「章」も可）"),
             serial: z.boolean().optional()

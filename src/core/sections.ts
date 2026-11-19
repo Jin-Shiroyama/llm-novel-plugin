@@ -1,5 +1,5 @@
 /**
- * opencode-novel-plugin - 本文の節（章・プロローグ・幕間・エピローグ）
+ * llm-novel-plugin - 本文の節（章・プロローグ・幕間・エピローグ）
  *
  * 番号のある章のほかに、番号を持たない節を3種類置ける。
  *
@@ -21,6 +21,7 @@ import { join } from "node:path"
 import {
   getChaptersDir, getNovelPath, listMarkdownFiles, chapterNumberFromFileName, readChapterDoc, safeReadFile,
 } from "./utils.js"
+import type { ChapterUnit } from "./constants.js"
 
 export type ManuscriptSection =
   | { kind: "chapter"; chapter: number }
@@ -89,19 +90,20 @@ export function sectionFromKey(key: string): ManuscriptSection | null {
 }
 
 /**
- * 節の呼び名（「第5章」「プロローグ」「幕間（第5章のあと）」）。
- * 同じ章のあとの2つ目からは「幕間（第5章のあと・2）」とする。
+ * 節の呼び名（「第5章」「プロローグ」「幕間（第5章のあと）」、unit: "話" なら「第5話」「幕間（第5話のあと）」）。
+ * 同じ章・話のあとの2つ目からは「幕間（第5章のあと・2）」とする。
  * あらすじの見出しにも使うので、parseSectionLabel で読み戻せる形にしておく。
  */
-export function sectionLabel(s: ManuscriptSection): string {
+export function sectionLabel(s: ManuscriptSection, unit?: ChapterUnit): string {
+  const u: ChapterUnit = unit === "話" || unit === "章" ? unit : "章"
   switch (s.kind) {
     case "chapter":
-      return `第${s.chapter}章`
+      return `第${s.chapter}${u}`
     case "prologue":
     case "epilogue":
       return SECTION_NAMES[s.kind]
     case "interlude":
-      return `幕間（第${s.chapter}章のあと${s.index > 1 ? `・${s.index}` : ""}）`
+      return `幕間（第${s.chapter}${u}のあと${s.index > 1 ? `・${s.index}` : ""}）`
   }
 }
 
@@ -386,9 +388,10 @@ export function partName(part: Part, numerals: "kanji" | "arabic", toKanji: (n: 
   return `第${numerals === "kanji" ? toKanji(part.number) : String(part.number)}部`
 }
 
-/** 部の範囲（「第1〜12章」「第13章〜」） */
-export function partRange(part: Part, lastChapter?: number): string {
+/** 部の範囲（「第1〜12章」「第13章〜」、unit: "話" なら「第1〜12話」） */
+export function partRange(part: Part, lastChapter?: number, unit?: ChapterUnit): string {
+  const u: ChapterUnit = unit === "話" || unit === "章" ? unit : "章"
   const to = part.toChapter ?? lastChapter ?? null
-  if (to === null) return `第${part.fromChapter}章〜`
-  return to === part.fromChapter ? `第${to}章` : `第${part.fromChapter}〜${to}章`
+  if (to === null) return `第${part.fromChapter}${u}〜`
+  return to === part.fromChapter ? `第${to}${u}` : `第${part.fromChapter}〜${to}${u}`
 }

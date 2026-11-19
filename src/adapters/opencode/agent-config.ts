@@ -1,5 +1,5 @@
 /**
- * opencode-novel-plugin - agent 設定の重ね合わせ
+ * llm-novel-plugin - agent 設定の重ね合わせ
  *
  * プラグインが用意する agent の既定に、opencode.json 側の設定を重ねる。
  * プラグインの入口（index.ts）から関数を export すると、OpenCode がそれを

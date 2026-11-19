@@ -208,7 +208,21 @@ describe("E2E ワークフロー: ジャンル別（ラブコメ／ファンタ�
     assert.ok(fixedFile.includes("「行く」"))
   })
 
-  test("SF（plot / 完結型）では serial: false となり world-building.md が作られる", async () => {
+  test("SF（plot / 完結型）では serial: false となり world-building.md が作られる（plot 既定値と正の整数検証）", async () => {
+    const badDir = makeDir()
+    assert.match(
+      await novelInitExecute({ title: "不正", genre: "SF", targetWords: 0 }, { projectDir: badDir }),
+      /^❌ targetWords は1以上の整数/,
+    )
+    assert.match(
+      await novelInitExecute({ title: "不正", genre: "SF", chapterCount: 0 }, { projectDir: badDir }),
+      /^❌ chapterCount は1以上の整数/,
+    )
+    assert.match(
+      await novelInitExecute({ title: "不正", genre: "SF", chapterCount: -2 }, { projectDir: badDir }),
+      /^❌ chapterCount は1以上の整数/,
+    )
+
     const dir = makeDir()
     const ctx = { projectDir: dir }
     const out = await novelInitExecute(
@@ -216,8 +230,6 @@ describe("E2E ワークフロー: ジャンル別（ラブコメ／ファンタ�
         title: "軌道宅配便かもめ号",
         genre: "近未来SF",
         storyMode: "plot",
-        chapterCount: 2,
-        targetWords: 6000,
       },
       ctx,
     )
@@ -226,6 +238,29 @@ describe("E2E ワークフロー: ジャンル別（ラブコメ／ファンタ�
     const config = JSON.parse(readFileSync(join(dir, ".novel/config.json"), "utf-8"))
     assert.equal(config.serial, false)
     assert.equal(config.worldBuilding, "standard")
+    assert.equal(config.targetWords, 100000)
+    assert.equal(config.chapterCount, 35)
+  })
+
+  test("chapterUnit: 章 を選んだ作品では資料・伏線案内・進行状況の単位が「章」で統一される", async () => {
+    const dir = makeDir()
+    const ctx = { projectDir: dir }
+    await novelInitExecute(
+      { title: "章立てテスト", genre: "SF", storyMode: "plot", chapterUnit: "章", targetWords: 6000, chapterCount: 2 },
+      ctx,
+    )
+    await novelUpdateExecute(
+      {
+        action: "foreshadow",
+        chapterNumber: 1,
+        content: JSON.stringify({ items: [{ title: "暗号", content: "謎の信号", status: "planted", targetChapter: 2 }] }),
+      },
+      ctx,
+    )
+    const ctxOut = await novelContextExecute({ chapterNumber: 1 }, ctx)
+    assert.ok(ctxOut.includes("執筆用の資料 — 第1章"))
+    assert.ok(ctxOut.includes("第2章あたりで回収予定"))
+    assert.ok(!ctxOut.includes("第2話あたりで回収予定"))
   })
 
   test("二次創作（sourceWork 指定）では canon/ 雛形が作られ、資料に原作情報と novel-fanfic が載る", async () => {

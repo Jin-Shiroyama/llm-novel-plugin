@@ -45,6 +45,12 @@ export const DEFAULTS = {
   indent: "fullwidth" as IndentStyle,
 } as const
 
+/** 1巻完結・全体構成型（storyMode: "plot"）の既定値（文庫1冊相当 10万字・35話） */
+export const PLOT_DEFAULTS = {
+  targetWords: 100000,
+  chapterCount: 35,
+} as const
+
 /** 短編・読み切り（storyMode: "short"）の既定値 */
 export const SHORT_DEFAULTS = {
   targetWords: 12000,

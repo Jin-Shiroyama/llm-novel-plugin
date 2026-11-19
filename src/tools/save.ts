@@ -51,7 +51,7 @@ export async function novelSaveChapterExecute(
     ? "本文"
     : section.kind === "chapter"
       ? `第${section.chapter}${unit}`
-      : sectionLabel(section)
+      : sectionLabel(section, unit)
   const fileName = sectionFileName(section)
   const chaptersDir = getChaptersDir(dir)
   const filePath = join(chaptersDir, fileName)

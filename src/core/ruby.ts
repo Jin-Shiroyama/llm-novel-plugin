@@ -1,5 +1,5 @@
 /**
- * opencode-novel-plugin - ルビと傍点
+ * llm-novel-plugin - ルビと傍点
  *
  * 本文はカクヨムの記法で書く（novel-writing skill の表記規約が正本）。
  *

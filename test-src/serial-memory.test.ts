@@ -96,7 +96,7 @@ describe("資料と進行状況で知らせる", () => {
     const tight = makeProject({ "config.json": config({ limits: { summary: 1000 } }), ...files })
     assert.match(await novelContextExecute({ chapterNumber: 21 } as any, ctx(tight)), /全体の流れ」にも入っていません/)
     const status = await novelStatusExecute({}, ctx(tight))
-    assert.match(status, /⚠️ あらすじの「全体の流れ」が古くなっています: 第6〜\d+章の出来事が、次の話の資料に載りません（全体の流れは第5章まで）/)
+    assert.match(status, /⚠️ あらすじの「全体の流れ」が古くなっています: 第6〜\d+話の出来事が、次の話の資料に載りません（全体の流れは第5話まで）/)
     // 既定の枠（4,000文字）なら20章ぶんが収まるので知らせない
     const roomy = makeProject({ "config.json": config(), ...files })
     assert.doesNotMatch(await novelStatusExecute({}, ctx(roomy)), /全体の流れ」が古くなっています/)

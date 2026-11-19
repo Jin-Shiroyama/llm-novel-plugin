@@ -26,7 +26,7 @@ import {
   CANON_TIMELINE_TEMPLATE,
   CANON_SETTING_TEMPLATE,
 } from "../core/templates.js"
-import { DEFAULTS, SHORT_DEFAULTS } from "../core/constants.js"
+import { DEFAULTS, PLOT_DEFAULTS, SHORT_DEFAULTS } from "../core/constants.js"
 import type {
   StoryMode,
   Seriousness,
@@ -84,11 +84,18 @@ export async function novelInitExecute(
 作り直す場合は .novel ディレクトリを削除してください。`
   }
 
+  if (args.targetWords !== undefined && !(Number.isInteger(args.targetWords) && args.targetWords > 0)) {
+    return `❌ targetWords は1以上の整数で指定してください（受け取ったのは ${args.targetWords}）。`
+  }
+  if (args.chapterCount !== undefined && !(Number.isInteger(args.chapterCount) && args.chapterCount > 0)) {
+    return `❌ chapterCount は1以上の整数で指定してください（受け取ったのは ${args.chapterCount}）。`
+  }
+
   const title = args.title.trim()
   const genre = args.genre.trim()
   const storyMode: StoryMode = args.storyMode ?? DEFAULTS.storyMode
   const short = storyMode === "short"
-  const defaults = short ? SHORT_DEFAULTS : DEFAULTS
+  const defaults = short ? SHORT_DEFAULTS : storyMode === "plot" ? PLOT_DEFAULTS : DEFAULTS
   const targetWords = args.targetWords ?? defaults.targetWords
   const chapterCount = args.chapterCount ?? defaults.chapterCount
   const perspective = args.narrativePerspective ?? DEFAULTS.narrativePerspective

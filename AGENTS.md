@@ -24,8 +24,8 @@ llm-novel-plugin/
 │   ├── index.ts                          # OpenCode プラグイン入口（{ id, server }）
 │   ├── core/                             # ハーネス非依存コアエンジン
 │   │   ├── index.ts                      # コア＆ツール関数の公開入口（将来の MCP 層が参照）
-│   │   ├── constants.ts                  # 既定値・構成型・シリアス度・ジャンル推定
-│   │   ├── utils.ts                      # パス・ファイル・進行判定・文字数・キャラ照合
+│   │   ├── constants.ts                  # 既定値・構成型・シリアス度・ジャンル判定キーワード
+│   │   ├── utils.ts                      # パス・ファイル・進行判定・ジャンル推定・文字数・キャラ照合
 │   │   ├── records.ts                    # 記録検証（character-state / foreshadow / summary）
 │   │   ├── character-state.ts            # 人物状態の章・節ごと差分管理
 │   │   ├── sections.ts                   # プロローグ・幕間・エピローグ・部

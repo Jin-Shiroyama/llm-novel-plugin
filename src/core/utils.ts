@@ -27,6 +27,12 @@ import type {
   ChapterUnit,
 } from "./constants.js"
 import { stripRuby } from "./ruby.js"
+import {
+  CONCEPT_TEMPLATE,
+  WORLD_BUILDING_TEMPLATE,
+  CHARACTER_PROFILES_TEMPLATE,
+  isUntouchedTemplate,
+} from "./templates.js"
 
 export { existsSync } from "node:fs"
 
@@ -478,15 +484,27 @@ export function characterNameKeys(name: string, aliases: string[] = []): { stron
   }
 
   add(trimmed)
-  for (const piece of trimmed.split(/[\s\u3000・]+/)) add(piece)
+  const pieces = trimmed.split(/[\s\u3000・]+/).filter((p) => p.length > 0)
+  for (const piece of pieces) add(piece)
 
-  const chars = [...trimmed]
-  const isHan = (c: string) => /^\p{Script=Han}$/u.test(c)
-  for (let n = 1; n < chars.length; n++) {
-    const head = chars.slice(0, n).join("")
-    const tail = chars.slice(chars.length - n).join("")
-    if (n > 1 || isHan(head)) add(head)
-    if (n > 1 || isHan(tail)) add(tail)
+  // スペースや中黒が無い氏名だけ、姓・名の候補を自動抽出する。
+  // カタカナ・ひらがな単独名（「ミナト」「アリス」等）は途中分割しない（愛称は aliases 欄で登録）。
+  if (pieces.length === 1) {
+    const chars = [...trimmed]
+    const isHan = (c: string) => /^\p{Script=Han}$/u.test(c)
+    if (chars.length >= 2 && chars.every(isHan)) {
+      for (let n = 1; n < chars.length; n++) {
+        add(chars.slice(0, n).join(""))
+        add(chars.slice(chars.length - n).join(""))
+      }
+    } else {
+      // 漢字の姓＋仮名の名（例: 白瀬しおり、星野アイ）は境目で 2 分割する
+      const hanKana = trimmed.match(/^(\p{Script=Han}{1,3})([\p{Script=Hiragana}\p{Script=Katakana}]{2,})$/u)
+      if (hanKana) {
+        add(hanKana[1])
+        add(hanKana[2])
+      }
+    }
   }
 
   for (const a of aliases) add(a)
@@ -935,8 +953,26 @@ export function seriousnessLabel(level: Seriousness): string {
 // ============================================================
 
 const PLACEHOLDER_PATTERN = /\[(?![ x-]\])[^\]\n]{1,60}\](?!\()/
+const TEMPLATE_PLACEHOLDER_GLOBAL = /\[(?![ x-]\])[^\]\n]+\](?!\()/g
 
-export function isDocFilled(filePath: string): boolean {
+function hasRemainingTemplatePlaceholder(content: string, template: string): boolean {
+  if (isUntouchedTemplate(content, template)) return true
+  const placeholders = new Set<string>()
+  for (const m of template.matchAll(TEMPLATE_PLACEHOLDER_GLOBAL)) {
+    placeholders.add(m[0])
+  }
+  for (const p of placeholders) {
+    if (content.includes(p)) return true
+  }
+  return false
+}
+
+/**
+ * 雛形ファイルが記入済みかを判定する。
+ * template を渡した場合は、テンプレート由来のプレースホルダが残っている（または未編集のまま）ときだけ未記入とみなし、
+ * 書き手が意図して書いた角括弧（[Lv1] や [仮] など）で工程が止まらないようにする。
+ */
+export function isDocFilled(filePath: string, template?: string): boolean {
   if (!existsSync(filePath)) return false
   let content: string
   try {
@@ -945,6 +981,7 @@ export function isDocFilled(filePath: string): boolean {
     return false
   }
   if (content.trim().length === 0) return false
+  if (template !== undefined) return !hasRemainingTemplatePlaceholder(content, template)
   return !PLACEHOLDER_PATTERN.test(content)
 }
 
@@ -967,9 +1004,9 @@ export function countWrittenChapters(projectDir: string): number {
  */
 export function determinePhase(projectDir: string, config?: NovelConfig | null): Phase {
   const short = isShortForm(config)
-  if (!isDocFilled(getDocPath(projectDir, "concept"))) return "concept"
-  if (usesWorldBuilding(config) && !isDocFilled(getDocPath(projectDir, "world-building"))) return "world-building"
-  if (!isDocFilled(getDocPath(projectDir, "characters"))) return "characters"
+  if (!isDocFilled(getDocPath(projectDir, "concept"), CONCEPT_TEMPLATE)) return "concept"
+  if (usesWorldBuilding(config) && !isDocFilled(getDocPath(projectDir, "world-building"), WORLD_BUILDING_TEMPLATE)) return "world-building"
+  if (!isDocFilled(getDocPath(projectDir, "characters"), CHARACTER_PROFILES_TEMPLATE)) return "characters"
   if (!existsSync(getDocPath(projectDir, "outline-brief"))) return "outline"
   if (!short && !hasOutlineDetailed(projectDir)) return "outline"
 

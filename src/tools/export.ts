@@ -106,8 +106,8 @@ export async function novelExportExecute(args: ExportArgs, ctx: ToolRuntimeConte
   if (unreadable.length > 0) {
     const unreadableChapters = unreadable.flatMap((f) => (f.section.kind === "chapter" ? [f.section.chapter] : []))
     const names = [
-      ...(unreadableChapters.length > 0 ? [formatChapterRanges(unreadableChapters)] : []),
-      ...unreadable.filter((f) => f.section.kind !== "chapter").map((f) => sectionLabel(f.section)),
+      ...(unreadableChapters.length > 0 ? [formatChapterRanges(unreadableChapters, unit)] : []),
+      ...unreadable.filter((f) => f.section.kind !== "chapter").map((f) => sectionLabel(f.section, unit)),
     ]
     return `❌ 読み込めない本文があるため、書き出していません: ${names.join("、")}
    ファイルの権限や中身を確かめてください。`
@@ -183,10 +183,10 @@ export async function novelExportExecute(args: ExportArgs, ctx: ToolRuntimeConte
   const range = [
     ...(bareChapter && chapters.length > 0
       ? ["本文（短編・読み切り）"]
-      : chapters.length > 0 ? [`${formatChapterRanges(chapters)}（${chapters.length}${unit}）`] : []),
+      : chapters.length > 0 ? [`${formatChapterRanges(chapters, unit)}（${chapters.length}${unit}）`] : []),
     ...(extras ? [extras] : []),
   ].join("＋")
-  let report = `✅ 原稿を書き出しました（${format === "text" ? "テキスト" : "Markdown"}${split ? "・1話ずつ" : ""}）
+  let report = `✅ 原稿を書き出しました（${format === "text" ? "テキスト" : "Markdown"}${split ? `・1${unit}ずつ` : ""}）
 ${written}
 📚 範囲: ${range}
 📊 文字数: ${totalChars.toLocaleString("ja-JP")}文字（本文のみ。見出しは含まない）
@@ -196,7 +196,7 @@ ${written}
     report += `🔤 ルビ ${marks.ruby}箇所・傍点 ${marks.emphasis}箇所を ${RUBY_NOTATION_LABELS[ruby]} で書き出しました\n`
   }
   if (missing.length > 0) {
-    report += `⚠️ 本文の無い話を飛ばしました: ${formatChapterRanges(missing)}\n`
+    report += `⚠️ 本文の無い${unit}を飛ばしました: ${formatChapterRanges(missing, unit)}\n`
   }
   if (typographyErrors > 0) {
     report += `⚠️ 表記の規約違反が ${typographyErrors}件あります（書き出しでは直していません）。novel_check で確かめられます\n`
@@ -262,11 +262,15 @@ const RUBY_NOTATION_LABELS: Record<RubyNotation, string> = {
 async function checkOutputPath(dir: string, outPath: string, shown: string): Promise<string | null> {
   const outside = `❌ 書き出し先は作品のディレクトリの中にしてください（受け取ったのは ${shown}）。`
   const intoChapters = `❌ .novel/chapters/ には書き出せません（本文ファイルと混ざるため）。`
+  const intoNovelData = `❌ .novel/ の中は .novel/export/ のみ書き出せます（作品データの上書きを防ぐため、${shown} には書き出せません）。`
 
   const rel = relative(dir, outPath)
   if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return outside
+  const novelDir = getNovelDir(dir)
+  const exportDir = join(novelDir, "export")
   const chaptersDir = getChaptersDir(dir)
-  if (isInside(chaptersDir, outPath)) return intoChapters
+  if (isSameOrInside(chaptersDir, outPath)) return intoChapters
+  if (isSameOrInside(novelDir, outPath) && !isInside(exportDir, outPath)) return intoNovelData
 
   const stat = await lstat(outPath).catch(() => null)
   if (stat?.isSymbolicLink()) {
@@ -275,10 +279,13 @@ async function checkOutputPath(dir: string, outPath: string, shown: string): Pro
   if (stat?.isDirectory()) return `❌ 書き出し先がディレクトリです（${shown}）。ファイル名まで指定してください。`
 
   const realProject = await realpath(dir)
+  const realNovel = await realpath(novelDir).catch(() => resolve(realProject, relative(dir, novelDir)))
+  const realExport = await realpath(exportDir).catch(() => resolve(realNovel, "export"))
   const realChapters = await realpath(chaptersDir).catch(() => resolve(realProject, relative(dir, chaptersDir)))
   const realTarget = join(await realpathOfNearest(dirname(outPath)), basename(outPath))
   if (!isInside(realProject, realTarget)) return outside
-  if (isInside(realChapters, realTarget)) return intoChapters
+  if (isSameOrInside(realChapters, realTarget)) return intoChapters
+  if (isSameOrInside(realNovel, realTarget) && !isInside(realExport, realTarget)) return intoNovelData
   return null
 }
 
@@ -300,6 +307,11 @@ async function realpathOfNearest(path: string): Promise<string> {
 function isInside(base: string, child: string): boolean {
   const rel = relative(base, child)
   return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel)
+}
+
+function isSameOrInside(base: string, child: string): boolean {
+  const rel = relative(base, child)
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))
 }
 
 function safeFileName(name: string): string {

@@ -55,6 +55,7 @@ import type { ManuscriptSection } from "../core/sections.js"
 import { sourceWorkOf, hasCanonOverview } from "../core/canon.js"
 import { parsePublishInfo, describePublishInfo, publishIssues } from "../core/publish.js"
 import { DEFAULTS } from "../core/constants.js"
+import { CONCEPT_TEMPLATE, WORLD_BUILDING_TEMPLATE, CHARACTER_PROFILES_TEMPLATE } from "../core/templates.js"
 import type { ToolRuntimeContext } from "./types.js"
 
 export interface StatusArgs {
@@ -139,20 +140,20 @@ export async function novelStatusExecute(
   const stages: Array<{ label: string; done: boolean; template?: boolean; optional?: boolean }> = [
     {
       label: "作品企画書（concept.md）",
-      done: isDocFilled(getDocPath(dir, "concept")),
+      done: isDocFilled(getDocPath(dir, "concept"), CONCEPT_TEMPLATE),
       template: existsSync(getDocPath(dir, "concept")),
     },
     ...(needsWorld || worldExists
       ? [{
           label: `舞台・設定（world-building.md${needsWorld ? "" : "・任意"}）`,
-          done: isDocFilled(getDocPath(dir, "world-building")),
+          done: isDocFilled(getDocPath(dir, "world-building"), WORLD_BUILDING_TEMPLATE),
           template: worldExists,
           optional: !needsWorld,
         }]
       : []),
     {
       label: "登場人物（characters/）",
-      done: isDocFilled(getDocPath(dir, "characters")),
+      done: isDocFilled(getDocPath(dir, "characters"), CHARACTER_PROFILES_TEMPLATE),
       template: existsSync(getDocPath(dir, "characters")),
     },
     { label: "プロット概要（outline-brief.md）", done: existsSync(getDocPath(dir, "outline-brief")) },
@@ -211,7 +212,7 @@ export async function novelStatusExecute(
 
   const countedChapters = counted.filter((c) => c.section.kind === "chapter")
   const unreadableChapters = unreadable.flatMap((s) => (s.kind === "chapter" ? [s.chapter] : []))
-  const unreadableExtras = unreadable.filter((s) => s.kind !== "chapter").map(sectionLabel)
+  const unreadableExtras = unreadable.filter((s) => s.kind !== "chapter").map((s) => sectionLabel(s, unit))
   const totalWords = counted.reduce((sum, c) => sum + c.words, 0)
   const manuscriptFileNames = new Set(manuscriptFiles.map((f) => basename(f.path)))
   const otherFiles = (await listMarkdownFiles(chaptersDir)).filter((f) => !manuscriptFileNames.has(f))
@@ -225,13 +226,13 @@ export async function novelStatusExecute(
         : `\n✍️ 執筆済み: ${chapterFiles.length}${unit}${extrasNote}\n`
     if (detailed) {
       for (const c of counted) {
-        const name = c.section.kind === "chapter" ? "" : `（${sectionLabel(c.section)}）`
+        const name = c.section.kind === "chapter" ? "" : `（${sectionLabel(c.section, unit)}）`
         report += `  📄 ${c.file}${name}: ${c.words.toLocaleString("ja-JP")}文字\n`
       }
     }
     if (unreadable.length > 0) {
-      const names = [...(unreadableChapters.length > 0 ? [formatChapterRanges(unreadableChapters)] : []), ...unreadableExtras]
-      report += `  ⚠️ 読み込めず数えていない話: ${names.join("、")}\n`
+      const names = [...(unreadableChapters.length > 0 ? [formatChapterRanges(unreadableChapters, unit)] : []), ...unreadableExtras]
+      report += `  ⚠️ 読み込めず数えていない${unit}: ${names.join("、")}\n`
     }
     report += `\n📊 累計: ${totalWords.toLocaleString("ja-JP")}文字`
     if (config?.targetWords) {
@@ -255,7 +256,7 @@ export async function novelStatusExecute(
       const to = part.toChapter ?? Math.max(planned ?? part.fromChapter, part.fromChapter, ...writtenChapters)
       const total = Math.max(0, to - part.fromChapter + 1)
       const done = writtenChapters.filter((n) => n >= part.fromChapter && n <= to).length
-      report += `  ${partName(part, "arabic", toKanjiNumber)}「${part.title}」（${partRange(part, to)}）: ${done}/${total}${unit}\n`
+      report += `  ${partName(part, "arabic", toKanjiNumber)}「${part.title}」（${partRange(part, to, unit)}）: ${done}/${total}${unit}\n`
     }
   }
   if (otherFiles.length > 0) {
@@ -292,9 +293,9 @@ export async function novelStatusExecute(
       if (gap) {
         const upTo = gap.chapters[gap.chapters.length - 1]
         issues.push(
-          `あらすじの「全体の流れ」が古くなっています: ${formatChapterRanges(gap.chapters)}の出来事が、次の話の資料に載りません` +
-            `（${gap.coverage > 0 ? `全体の流れは第${gap.coverage}章まで` : "全体の流れがまだ無い"}）。` +
-            `novel_update(summary) に「## 全体の流れ」で始まる要約を渡し、第${upTo}章まで更新してください`,
+          `あらすじの「全体の流れ」が古くなっています: ${formatChapterRanges(gap.chapters, unit)}の出来事が、次の${unit}の資料に載りません` +
+            `（${gap.coverage > 0 ? `全体の流れは第${gap.coverage}${unit}まで` : "全体の流れがまだ無い"}）。` +
+            `novel_update(summary) に「## 全体の流れ」で始まる要約を渡し、第${upTo}${unit}まで更新してください`,
         )
       }
     }
@@ -302,7 +303,7 @@ export async function novelStatusExecute(
       const recorded = new Set(summaryRecord.kind === "ok" ? summaryChapters(summaryRecord.value) : [])
       const missing = writtenChapters.filter((n) => !recorded.has(n))
       if (missing.length > 0) {
-        issues.push(`あらすじの記録が無い話: ${formatChapterRanges(missing)}`)
+        issues.push(`あらすじの記録が無い${unit}: ${formatChapterRanges(missing, unit)}`)
       }
     }
 
@@ -313,27 +314,27 @@ export async function novelStatusExecute(
       const open = mine.filter((s) => s.status !== "completed")
       if (open.length === 0) continue
       if (open.length === mine.length) allOpen.push(n)
-      else partlyOpen.push(`第${n}章（${open.map((s) => s.id).join(", ")}）`)
+      else partlyOpen.push(`第${n}${unit}（${open.map((s) => s.id).join(", ")}）`)
     }
     if (allOpen.length > 0 || partlyOpen.length > 0) {
-      const p = [...(allOpen.length > 0 ? [`${formatChapterRanges(allOpen)}（全シーン）`] : []), ...partlyOpen]
-      issues.push(`本文はあるが、完了になっていないシーンが残っている話: ${p.join("、")}（書いたシーンは状態を [x] に）`)
+      const p = [...(allOpen.length > 0 ? [`${formatChapterRanges(allOpen, unit)}（全シーン）`] : []), ...partlyOpen]
+      issues.push(`本文はあるが、完了になっていないシーンが残っている${unit}: ${p.join("、")}（書いたシーンは状態を [x] に）`)
     }
   }
   if (extraFiles.length > 0 && summaryRecord.kind !== "broken") {
     const recorded = summaryRecord.kind === "ok" ? summarySections(summaryRecord.value) : []
     const missing = extraFiles.filter((f) => !recorded.some((r) => sameSection(r, f.section)))
     if (missing.length > 0) {
-      issues.push(`あらすじの記録が無い節: ${missing.map((f) => sectionLabel(f.section)).join("、")}`)
+      issues.push(`あらすじの記録が無い節: ${missing.map((f) => sectionLabel(f.section, unit)).join("、")}`)
     }
   }
   if (stateRecord.kind !== "broken" && (writtenChapters.length > 0 || extraFiles.length > 0)) {
     const recorded = new Set(Object.keys(stateRecord.kind === "ok" ? stateRecord.value.sections : {}))
     const missingChapters = writtenChapters.filter((n) => !recorded.has(sectionKey({ kind: "chapter", chapter: n })))
-    const missingExtras = extraFiles.filter((f) => !recorded.has(sectionKey(f.section))).map((f) => sectionLabel(f.section))
-    const missing = [...(missingChapters.length > 0 ? [formatChapterRanges(missingChapters)] : []), ...missingExtras]
+    const missingExtras = extraFiles.filter((f) => !recorded.has(sectionKey(f.section))).map((f) => sectionLabel(f.section, unit))
+    const missing = [...(missingChapters.length > 0 ? [formatChapterRanges(missingChapters, unit)] : []), ...missingExtras]
     if (missing.length > 0) {
-      issues.push(`人物の状態の記録が無い話・節: ${missing.join("、")}（変化が無ければ novel_update(character-state) に {"updates": []} を渡して記録済みにします）`)
+      issues.push(`人物の状態の記録が無い${unit}・節: ${missing.join("、")}（変化が無ければ novel_update(character-state) に {"updates": []} を渡して記録済みにします）`)
     }
   }
   for (const x of brokenForeshadow) {
@@ -352,7 +353,7 @@ export async function novelStatusExecute(
     issues.push("原作の資料がまだありません（.novel/canon/overview.md が雛形のまま、または無い）。基準にする範囲・分岐点・変えることを先に整えてください")
   }
   if (unreadableChapters.length > 0) {
-    issues.push(`読み込めない話があります: ${formatChapterRanges(unreadableChapters)}`)
+    issues.push(`読み込めない${unit}があります: ${formatChapterRanges(unreadableChapters, unit)}`)
   }
   if (parts && "error" in parts) issues.push(parts.error)
   if (unreadableExtras.length > 0) {

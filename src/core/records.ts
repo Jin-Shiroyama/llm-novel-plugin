@@ -1,5 +1,5 @@
 /**
- * opencode-novel-plugin - 記録（人物の状態・伏線・あらすじ）の形式
+ * llm-novel-plugin - 記録（人物の状態・伏線・あらすじ）の形式
  *
  * novel_update が受け取る JSON の検証と、あらすじを章ごとの節で持つための処理。
  *
@@ -15,6 +15,7 @@ import { z } from "zod"
 import { parseChapterNumber } from "./utils.js"
 import { parseSectionLabel, sectionLabel, compareSections, sectionFromKey, sectionKey } from "./sections.js"
 import type { ManuscriptSection } from "./sections.js"
+import type { ChapterUnit } from "./constants.js"
 import type { ForeshadowEntry } from "./utils.js"
 import type { CharacterStateFile } from "./character-state.js"
 
@@ -784,8 +785,9 @@ export function buildSummaryContext(
   target: number | ManuscriptSection,
   limit: number,
   lastChapter?: number,
+  unit?: ChapterUnit,
 ): string {
-  return planSummaryContext(text, target, limit, lastChapter).text
+  return planSummaryContext(text, target, limit, lastChapter, unit).text
 }
 
 /**
@@ -807,7 +809,9 @@ function planSummaryContext(
   target: number | ManuscriptSection,
   limit: number,
   lastChapter?: number,
+  unit?: ChapterUnit,
 ): { text: string; uncovered: number[]; coverage: number } {
+  const u: ChapterUnit = unit === "話" || unit === "章" ? unit : "章"
   const at: ManuscriptSection = typeof target === "number" ? { kind: "chapter", chapter: target } : target
   const parsed = parseSummary(text)
   const overview = parsed.sections.find(isOverview)
@@ -832,9 +836,9 @@ function planSummaryContext(
     const coverage = overviewCoverage(overview) ?? lastRecorded
     if (coverageBefore(coverage, at)) {
       covered = Math.max(covered, coverage)
-      lead.push(`### ${OVERVIEW_HEADING}（第${coverage}章まで）\n${overview.body}`)
+      lead.push(`### ${OVERVIEW_HEADING}（第${coverage}${u}まで）\n${overview.body}`)
     } else {
-      notes.push(`（${OVERVIEW_HEADING}は第${coverage}章までの要約で、この章より先を含むため載せていません）`)
+      notes.push(`（${OVERVIEW_HEADING}は第${coverage}${u}までの要約で、この${u}より先を含むため載せていません）`)
     }
   }
   // 旧形式の記述。移した節は見出しに固定した範囲で判定する。
@@ -848,10 +852,10 @@ function planSummaryContext(
   for (const part of legacyParts) {
     if (coverageBefore(part.coverage, at)) {
       covered = Math.max(covered, part.coverage)
-      const range = part.coverage > 0 ? `（第${part.coverage}章まで）` : ""
+      const range = part.coverage > 0 ? `（第${part.coverage}${u}まで）` : ""
       lead.push(`### ${LEGACY_HEADING}${range}\n${part.body}`)
     } else {
-      notes.push(`（${LEGACY_HEADING}は第${part.coverage}章までを含むため載せていません）`)
+      notes.push(`（${LEGACY_HEADING}は第${part.coverage}${u}までを含むため載せていません）`)
     }
   }
   const leadText = lead.join("\n\n")
@@ -892,10 +896,10 @@ function planSummaryContext(
     const last = dropped[dropped.length - 1]
     const range =
       first === last
-        ? sectionLabel(entrySection(first)!)
+        ? sectionLabel(entrySection(first)!, u)
         : first.chapter !== null && last.chapter !== null
-          ? `第${first.chapter}〜${last.chapter}章`
-          : `${sectionLabel(entrySection(first)!)}〜${sectionLabel(entrySection(last)!)}`
+          ? `第${first.chapter}〜${last.chapter}${u}`
+          : `${sectionLabel(entrySection(first)!, u)}〜${sectionLabel(entrySection(last)!, u)}`
     out.push(`（${range}のあらすじは枠に収まらないため省略。全文は .novel/summary.md を参照）`)
   }
   // 枠から落ちた章のうち、全体の流れにも入っていないもの
@@ -903,9 +907,9 @@ function planSummaryContext(
   if (uncovered.length > 0) {
     const upTo = uncovered[uncovered.length - 1]
     out.push(
-      `⚠️ ${formatChapterRanges(uncovered)}の出来事は、枠に収まらず「${OVERVIEW_HEADING}」にも入っていません` +
-        `（${covered > 0 ? `いまの${OVERVIEW_HEADING}は第${covered}章まで` : `${OVERVIEW_HEADING}がまだ無い`}）。` +
-        `この章を書き終えたら、.novel/summary.md を読んで、novel_update(action: "summary", chapterNumber: ${upTo}) に「## ${OVERVIEW_HEADING}」の行で始まる要約を渡し、第${upTo}章まで更新してください`,
+      `⚠️ ${formatChapterRanges(uncovered, u)}の出来事は、枠に収まらず「${OVERVIEW_HEADING}」にも入っていません` +
+        `（${covered > 0 ? `いまの${OVERVIEW_HEADING}は第${covered}${u}まで` : `${OVERVIEW_HEADING}がまだ無い`}）。` +
+        `この${u}を書き終えたら、.novel/summary.md を読んで、novel_update(action: "summary", chapterNumber: ${upTo}) に「## ${OVERVIEW_HEADING}」の行で始まる要約を渡し、第${upTo}${u}まで更新してください`,
     )
   }
   for (const s of picked) out.push(`${s.heading.replace(/^##/, "###")}\n${s.body}`)
@@ -920,14 +924,15 @@ function planSummaryContext(
   const missing: number[] = []
   for (let n = 1; n <= lastBefore; n++) if (!recorded.has(n)) missing.push(n)
   if (missing.length > 0) {
-    out.push(`⚠️ あらすじの記録が無い章: ${missing.map((n) => `第${n}章`).join("、")}`)
+    out.push(`⚠️ あらすじの記録が無い${u}: ${missing.map((n) => `第${n}${u}`).join("、")}`)
   }
 
   return { text: out.join("\n\n"), uncovered, coverage: covered }
 }
 
-/** [1,2,3,5] → 「第1〜3章、第5章」 */
-export function formatChapterRanges(nums: number[]): string {
+/** [1,2,3,5] → 「第1〜3章、第5章」（unit: "話" なら「第1〜3話、第5話」） */
+export function formatChapterRanges(nums: number[], unit?: ChapterUnit): string {
+  const u: ChapterUnit = unit === "話" || unit === "章" ? unit : "章"
   const out: string[] = []
   let start = nums[0]
   let prev = nums[0]
@@ -936,7 +941,7 @@ export function formatChapterRanges(nums: number[]): string {
       prev = n
       continue
     }
-    out.push(start === prev ? `第${start}章` : `第${start}〜${prev}章`)
+    out.push(start === prev ? `第${start}${u}` : `第${start}〜${prev}${u}`)
     start = n
     prev = n
   }

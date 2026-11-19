@@ -1,5 +1,5 @@
 /**
- * opencode-novel-plugin - コマンド定義の読み込み
+ * llm-novel-plugin - コマンド定義の読み込み
  *
  * commands/*.md を読み、OpenCode の `config.command` に渡す形にする。
  */

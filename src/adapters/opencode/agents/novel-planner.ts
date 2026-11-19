@@ -6,7 +6,7 @@ export function createNovelPlannerAgent(): Record<string, unknown> {
     temperature: 0.4,
     permission: {
       edit: "allow",
-      bash: "allow",
+      bash: "ask",
       webfetch: "allow",
       websearch: "allow",
       question: "allow",

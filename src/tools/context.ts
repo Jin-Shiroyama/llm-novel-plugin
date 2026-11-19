@@ -71,7 +71,7 @@ import { parseGlossary, buildGlossaryContext } from "../core/glossary.js"
 import { statesBefore, lastRecordedBefore, stateKeyNames, formatStateKeyNames } from "../core/character-state.js"
 import type { ResolvedCharacter } from "../core/character-state.js"
 import { sourceWorkOf, readCanonParts } from "../core/canon.js"
-import type { LimitKey, Seriousness } from "../core/constants.js"
+import type { LimitKey, Seriousness, ChapterUnit } from "../core/constants.js"
 import type { ToolRuntimeContext } from "./types.js"
 
 export interface ContextArgs {
@@ -101,12 +101,11 @@ export async function novelContextExecute(
   const resolved = sectionFromArgs(args)
   if ("error" in resolved) return `❌ ${resolved.error}。`
   const section = resolved.section
-  let label = sectionLabel(section)
   const includePrompts = args.includePrompts !== false
-
   const config = await safeReadJson<NovelConfig>(getConfigPath(dir))
-  const chapterCount = config?.chapterCount ?? DEFAULTS.chapterCount
+  const chapterCount = Math.max(1, config?.chapterCount ?? DEFAULTS.chapterCount)
   const unit = config?.chapterUnit ?? DEFAULTS.chapterUnit
+  let label = sectionLabel(section, unit)
   const manuscriptFiles = await listManuscriptFiles(dir)
   const lastWritten = lastWrittenChapter(manuscriptFiles)
   const chapterNum = recordChapterOf(section, lastChapterForRecords(manuscriptFiles, chapterCount))
@@ -121,7 +120,7 @@ export async function novelContextExecute(
   let context = `📝 執筆用の資料 — ${label}\n${"=".repeat(50)}\n\n`
 
   if (config) {
-    const targetWords = config.targetWords ?? DEFAULTS.targetWords
+    const targetWords = config.targetWords && config.targetWords > 0 ? config.targetWords : DEFAULTS.targetWords
     context += `## 📖 作品情報\n`
     context += `タイトル: ${config.title}\n`
     context += `ジャンル: ${config.genre}\n`
@@ -134,7 +133,7 @@ export async function novelContextExecute(
       const part = partOfChapter(parts.parts, section.chapter)
       if (part) {
         const nth = section.kind === "chapter" ? `の${section.chapter - part.fromChapter + 1}${unit}目` : ""
-        context += `部: ${partName(part, "arabic", toKanjiNumber)}「${part.title}」（${partRange(part, Math.max(chapterCount, lastWritten))}）${nth}\n`
+        context += `部: ${partName(part, "arabic", toKanjiNumber)}「${part.title}」（${partRange(part, Math.max(chapterCount, lastWritten), unit)}）${nth}\n`
       }
     } else if (parts && "error" in parts) {
       context += `⚠️ ${parts.error}\n`
@@ -229,7 +228,7 @@ export async function novelContextExecute(
   const states = charState.kind === "ok" ? statesBefore(charState.value, section) : []
 
   // --- ことばづかい（P1） ---
-  const speech = buildSpeechContext(allCharacterDocs, relevantDocs, states, chapterText)
+  const speech = buildSpeechContext(allCharacterDocs, relevantDocs, states, chapterText, unit)
   if (speech) {
     const limit = resolveLimit(config, "speech")
     const [body, truncated] = truncateChars(speech, limit)
@@ -246,8 +245,8 @@ export async function novelContextExecute(
     context += `⚠️ ${describeBrokenRecord(".novel/characters/state.json", charState)}。直すまで人物の状態は載せられず、更新もできません\n\n`
   } else if (states.length > 0 && charState.kind === "ok") {
     const asOf = lastRecordedBefore(charState.value, section)
-    context += `## 🔄 登場人物の現在の状態（${asOf ? `${sectionLabel(asOf)}の終わり時点` : "記録より"}） (P1 — 重要)\n`
-    context += buildCharacterStateContext(states, allCharacterDocs, relevantDocs, chapterText, resolveLimit(config, "characterState"))
+    context += `## 🔄 登場人物の現在の状態（${asOf ? `${sectionLabel(asOf, unit)}の終わり時点` : "記録より"}） (P1 — 重要)\n`
+    context += buildCharacterStateContext(states, allCharacterDocs, relevantDocs, chapterText, resolveLimit(config, "characterState"), unit)
     context += "\n\n"
   }
   const keyNames = charState.kind === "ok" ? formatStateKeyNames(stateKeyNames(charState.value)) : ""
@@ -261,7 +260,7 @@ export async function novelContextExecute(
   if (prev && prevText) {
     const limit = resolveLimit(config, "previousChapterTail")
     const tail = takeTailChars(prevText, limit)
-    const prevName = prev.section.kind === "chapter" ? `前の${unit}` : `前の${sectionLabel(prev.section)}`
+    const prevName = prev.section.kind === "chapter" ? `前の${unit}` : `前の${sectionLabel(prev.section, unit)}`
     context += `## 📖 ${prevName}の末尾${limit.toLocaleString("ja-JP")}文字 (P1 — つなぎ)\n${tail}\n\n`
   }
 
@@ -315,7 +314,7 @@ export async function novelContextExecute(
       summary.kind === "broken"
         ? `⚠️ ${describeBrokenRecord(".novel/summary.md", summary)}。直すまであらすじは載せられず、更新もできません`
         : summary.kind === "ok"
-          ? buildSummaryContext(summary.value, section, resolveLimit(config, "summary"), lastWritten)
+          ? buildSummaryContext(summary.value, section, resolveLimit(config, "summary"), lastWritten, unit)
           : ""
     if (summaryText) {
       context += `## 📚 これまでのあらすじ (P2 — 参考)\n${summaryText}\n\n`
@@ -336,7 +335,7 @@ export async function novelContextExecute(
       context += `## 🎯 伏線の確認 (P2 — 参考)\n`
       for (const r of reminders) {
         context += `${foreshadowIcon(r)} [${r.item.id}] ${r.item.title}: ${r.item.content}\n`
-        context += `   ${foreshadowNote(r, label)}\n`
+        context += `   ${foreshadowNote(r, label, unit)}\n`
       }
       for (const x of invalid) {
         const raw = foreshadow.items.find((f) => (f as { id?: unknown })?.id === x.id) as Record<string, unknown> | undefined
@@ -350,7 +349,7 @@ export async function novelContextExecute(
 
   // --- 書くときの条件 ---
   if (includePrompts && config) {
-    const targetWords = config.targetWords ?? DEFAULTS.targetWords
+    const targetWords = config.targetWords && config.targetWords > 0 ? config.targetWords : DEFAULTS.targetWords
     const isOpening = prev === null && (section.kind === "prologue" || (section.kind === "chapter" && section.chapter === 1))
     const perChapter = Math.round(targetWords / chapterCount).toLocaleString("ja-JP")
     const tolerance = Math.round(CHAPTER_WORD_TOLERANCE * 100)
@@ -410,13 +409,14 @@ function buildCharacterStateContext(
   relevantDocs: CharacterDoc[],
   chapterText: string,
   limit: number,
+  unit: ChapterUnit,
 ): string {
   const hits = statesInText(states, allDocs, chapterText)
   const relevant = (c: ResolvedCharacter) => hits.has(c.name) || relevantDocs.some((d) => docMatchesName(d, c.name))
   const statusMark = (c: ResolvedCharacter) => {
     if (c.status === "active") return ""
     const at = c.changedAt.status
-    return `【${STATUS_LABELS[c.status] ?? c.status}${at ? `（${sectionLabel(at)}）` : ""}】`
+    return `【${STATUS_LABELS[c.status] ?? c.status}${at ? `（${sectionLabel(at, unit)}）` : ""}】`
   }
   const pairs = (map: Record<string, string>, sep: string) =>
     Object.entries(map).map(([k, v]) => `${k}${sep}${v}`).join(" ／ ")
@@ -436,7 +436,7 @@ function buildCharacterStateContext(
     if (recent.length > 0) {
       const omitted = c.events.length - recent.length
       lines.push(`  これまでの出来事${omitted > 0 ? `（直近${recent.length}件）` : ""}:`)
-      for (const e of recent) lines.push(`    - [${sectionLabel(e.at)}] ${e.text}`)
+      for (const e of recent) lines.push(`    - [${sectionLabel(e.at, unit)}] ${e.text}`)
     }
     blocks.push({ name: c.name, text: lines.join("\n") })
   }
@@ -478,6 +478,7 @@ function buildSpeechContext(
   relevantDocs: CharacterDoc[],
   states: ResolvedCharacter[],
   chapterText: string,
+  unit: ChapterUnit,
 ): string {
   const matches = docMatchesName
   const hits = statesInText(states, allDocs, chapterText)
@@ -500,7 +501,7 @@ function buildSpeechContext(
   for (const { name, profile, state } of entries) {
     const changed = (field: string) => {
       const at = state?.changedAt[field]
-      return at ? `（${sectionLabel(at)}で変更）` : "（記録で変更）"
+      return at ? `（${sectionLabel(at, unit)}で変更）` : "（記録で変更）"
     }
     const fields: string[] = []
     const firstPerson = state?.firstPerson ?? profile.firstPerson
@@ -591,16 +592,16 @@ function foreshadowIcon(r: ForeshadowReminder): string {
   }
 }
 
-function foreshadowNote(r: ForeshadowReminder, currentLabel: string): string {
+function foreshadowNote(r: ForeshadowReminder, currentLabel: string, unit: ChapterUnit): string {
   const planted = r.item.status === "planted" ? "張り済み" : "まだ張っていません"
   const target = r.item.targetChapter
   switch (r.timing) {
     case "overdue":
-      return `${planted}／回収予定の第${target}話を過ぎています（現在は${currentLabel}）`
+      return `${planted}／回収予定の第${target}${unit}を過ぎています（現在は${currentLabel}）`
     case "due":
       return `${planted}／← ここで回収予定`
     case "upcoming":
-      return `${planted}／第${target}話あたりで回収予定`
+      return `${planted}／第${target}${unit}あたりで回収予定`
     case "undated":
       return `${planted}／回収のタイミングは未定`
   }

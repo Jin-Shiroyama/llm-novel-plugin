@@ -30,7 +30,8 @@ import type { ManuscriptSection, SectionKind } from "../core/sections.js"
 import { readGlossaryCheck } from "../core/glossary.js"
 import { checkProse, summarizeProse, formatProseIssue, PROSE_RULE_LABELS } from "../core/prose.js"
 import type { ProseIssue } from "../core/prose.js"
-import type { IndentStyle } from "../core/constants.js"
+import { DEFAULTS } from "../core/constants.js"
+import type { IndentStyle, ChapterUnit } from "../core/constants.js"
 import type { ToolRuntimeContext } from "./types.js"
 
 export interface CheckArgs {
@@ -54,16 +55,17 @@ export async function novelCheckExecute(args: CheckArgs, ctx: ToolRuntimeContext
     if ("error" in resolved) return `❌ ${resolved.error}。`
     target = resolved.section
   }
+  const config = await safeReadJson<NovelConfig>(getConfigPath(dir))
+  const unit = config?.chapterUnit ?? DEFAULTS.chapterUnit
   const files = (await listManuscriptFiles(dir)).filter(
     (f) => target === null || sameSection(f.section, target),
   )
   if (files.length === 0) {
     return target === null
       ? `❌ 本文がまだありません（.novel/chapters/chapter-NNN.md）。`
-      : `❌ ${sectionLabel(target)}の本文が見つかりません（.novel/chapters/${sectionFileName(target)}）。`
+      : `❌ ${sectionLabel(target, unit)}の本文が見つかりません（.novel/chapters/${sectionFileName(target)}）。`
   }
 
-  const config = await safeReadJson<NovelConfig>(getConfigPath(dir))
   const indent = indentStyleOf(config)
   const glossary = await readGlossaryCheck(dir)
   const results: Array<{ section: ManuscriptSection; issues: TypographyIssue[]; prose: ProseIssue[] }> = []
@@ -94,7 +96,7 @@ export async function novelCheckExecute(args: CheckArgs, ctx: ToolRuntimeContext
   }
 
   const unreadableNote = unreadable.length > 0
-    ? `⚠️ 読み込めず点検できなかった話: ${formatSections(unreadable)}（ファイルの権限や中身を確かめてください）\n`
+    ? `⚠️ 読み込めず点検できなかった${unit}: ${formatSections(unreadable, unit)}（ファイルの権限や中身を確かめてください）\n`
     : ""
   if (results.length === 0) {
     return `❌ 点検できる本文がありません。\n${unreadableNote}`
@@ -111,8 +113,8 @@ export async function novelCheckExecute(args: CheckArgs, ctx: ToolRuntimeContext
       : `ℹ️ 自動修正できる表記箇所はありませんでした\n`
 
   const all = results.flatMap((r) => r.issues)
-  const scope = target === null ? describeScope(results.map((r) => r.section)) : sectionLabel(target)
-  const proseReport = formatProseReport(results, scope, max)
+  const scope = target === null ? describeScope(results.map((r) => r.section), unit) : sectionLabel(target, unit)
+  const proseReport = formatProseReport(results, scope, max, unit)
   if (all.length === 0) {
     const head = unreadable.length > 0
       ? `${fixNote}⚠️ 表記の点検（${scope}）: 点検できた本文には、規約から外れた箇所はありません。\n${unreadableNote}`
@@ -132,10 +134,10 @@ export async function novelCheckExecute(args: CheckArgs, ctx: ToolRuntimeContext
 
   for (const { section, issues } of results) {
     if (issues.length === 0) continue
-    report += `\n## ${sectionLabel(section)}（${issues.length}件）\n`
+    report += `\n## ${sectionLabel(section, unit)}（${issues.length}件）\n`
     for (const issue of issues.slice(0, max)) report += `${formatIssue(issue)}\n`
     if (issues.length > max) {
-      report += `…ほか${issues.length - max}件（maxIssues を上げるか、話を指定して見てください）\n`
+      report += `…ほか${issues.length - max}件（maxIssues を上げるか、${unit}を指定して見てください）\n`
     }
   }
   return proseReport ? `${report}\n${proseReport}` : report
@@ -145,6 +147,7 @@ function formatProseReport(
   results: Array<{ section: ManuscriptSection; prose: ProseIssue[] }>,
   scope: string,
   max: number,
+  unit: ChapterUnit,
 ): string {
   const all = results.flatMap((r) => r.prose)
   if (all.length === 0) return ""
@@ -157,10 +160,10 @@ function formatProseReport(
   }
   for (const { section, prose } of results) {
     if (prose.length === 0) continue
-    report += `\n## ${sectionLabel(section)}（${prose.length}件）\n`
+    report += `\n## ${sectionLabel(section, unit)}（${prose.length}件）\n`
     for (const issue of prose.slice(0, max)) report += `${formatProseIssue(issue)}\n`
     if (prose.length > max) {
-      report += `…ほか${prose.length - max}件（maxIssues を上げるか、話を指定して見てください）\n`
+      report += `…ほか${prose.length - max}件（maxIssues を上げるか、${unit}を指定して見てください）\n`
     }
   }
   return report
@@ -194,15 +197,15 @@ export function summarizeForSave(
   return out
 }
 
-function formatSections(sections: ManuscriptSection[]): string {
+function formatSections(sections: ManuscriptSection[], unit: ChapterUnit): string {
   const chapters = sections.flatMap((s) => (s.kind === "chapter" ? [s.chapter] : []))
-  const others = sections.filter((s) => s.kind !== "chapter").map(sectionLabel)
-  return [...(chapters.length > 0 ? [formatChapterRanges(chapters)] : []), ...others].join("、")
+  const others = sections.filter((s) => s.kind !== "chapter").map((s) => sectionLabel(s, unit))
+  return [...(chapters.length > 0 ? [formatChapterRanges(chapters, unit)] : []), ...others].join("、")
 }
 
-function describeScope(sections: ManuscriptSection[]): string {
+function describeScope(sections: ManuscriptSection[], unit: ChapterUnit): string {
   const chapters = sections.filter((s) => s.kind === "chapter").length
   const extras = describeExtraSections(sections)
-  if (!extras) return `${chapters}話`
-  return chapters > 0 ? `${chapters}話と${extras}` : extras
+  if (!extras) return `${chapters}${unit}`
+  return chapters > 0 ? `${chapters}${unit}と${extras}` : extras
 }

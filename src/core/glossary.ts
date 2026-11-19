@@ -1,5 +1,5 @@
 /**
- * opencode-novel-plugin - 用語集（.novel/glossary.md）
+ * llm-novel-plugin - 用語集（.novel/glossary.md）
  *
  * 造語・固有名詞の意味と表記を、表の形で持つ。
  *

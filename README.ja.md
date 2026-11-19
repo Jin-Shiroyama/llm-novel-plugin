@@ -23,12 +23,27 @@
 
 ## 導入と使い方（OpenCode）
 
-ビルドしたプラグインを OpenCode の設定に登録します。
+ビルドしたプラグインを OpenCode の設定（`opencode.json`）に登録します。
 
 ```bash
 pnpm install
 pnpm build
 ```
+
+`opencode.json` の設定例（ローカルパスで読み込む場合）：
+
+```json
+{
+  "plugin": ["file:///path/to/llm-novel-plugin"],
+  "agent": {
+    "novel-writer": {
+      "model": "anthropic/claude-sonnet-4-5"
+    }
+  }
+}
+```
+
+- 既定の権限では `novel-writer` / `novel-editor` の `bash` は `deny`、`novel-planner` は `ask` に設定されています。`git` などを使いたい場合は `opencode.json` の `agent.<name>.permission.bash` で上書きできます。
 
 主なスラッシュコマンド：
 

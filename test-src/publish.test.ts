@@ -131,6 +131,26 @@ describe("1話ずつの書き出し（split）", () => {
     assert.deepEqual(readdirSync(join(dir, ".novel", "chapters")).sort(), Object.keys(CHAPTERS).map((k) => k.slice("chapters/".length)).sort())
   })
 
+  test(".novel/ 配下の資料ファイル（concept.md や config.json など）への書き出しを断り、上書きを防ぐ", async () => {
+    const dir = makeProject({
+      "config.json": config(),
+      "concept.md": "# 大事な企画書\n",
+      "canon/overview.md": "# 原作資料\n",
+      ...CHAPTERS,
+    })
+    for (const bad of [".novel/concept.md", ".novel/config.json", ".novel/canon/overview.md", ".novel/out.txt"]) {
+      const out = await novelExportExecute({ outputPath: bad }, ctx(dir))
+      assert.match(out, /❌ \.novel\/ の中は \.novel\/export\/ のみ書き出せます/, bad)
+    }
+    assert.equal(read(dir, ".novel", "concept.md"), "# 大事な企画書\n")
+    assert.equal(read(dir, ".novel", "canon", "overview.md"), "# 原作資料\n")
+
+    // .novel/export/ の中への任意ファイル名指定は許可される
+    const ok = await novelExportExecute({ outputPath: ".novel/export/custom.txt" }, ctx(dir))
+    assert.match(ok, /^✅ 原稿を書き出しました/)
+    assert.ok(read(dir, ".novel", "export", "custom.txt").includes("第1話　追放"))
+  })
+
   test("書き出し先のファイルがリンクなら、1つも書かずに断る", async () => {
     const dir = makeProject({ "config.json": config(), ...CHAPTERS })
     const out = join(dir, "ep")

@@ -1,5 +1,5 @@
 /**
- * opencode-novel-plugin - 原作の資料（二次創作）
+ * llm-novel-plugin - 原作の資料（二次創作）
  *
  * config.json の sourceWork（原作名）があれば二次創作として扱い、.novel/canon/ に置いた
  * 原作の資料を執筆用の資料に載せる。モデルの記憶で原作を補わせると、もっともらしい誤りが

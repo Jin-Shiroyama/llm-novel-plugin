@@ -8,6 +8,8 @@ import {
   inferSeriousness,
   recommendedGenreSkills,
   determinePhase,
+  isDocFilled,
+  characterNameKeys,
   stripChapterHeading,
   chapterTitleFromHeading,
 } from "../src/core/utils.js"
@@ -112,6 +114,41 @@ describe("進行段階（determinePhase）の軽量化", () => {
     assert.equal(stripChapterHeading("# 第1話 はじまり\n\n　本文だ。"), "　本文だ。")
     assert.equal(chapterTitleFromHeading("# 第1話 はじまり\n\n　本文だ。"), "はじまり")
     assert.equal(chapterTitleFromHeading("# 第2章 つづき\n\n　本文だ。"), "つづき")
+  })
+
+  test("isDocFilled は書き手の角括弧（[Lv1] や [仮]）で誤って未記入と判定しない", () => {
+    const dir = makeTempProject()
+    // 雛形のプレースホルダが残っていれば未記入
+    writeFile(dir, ".novel/concept.md", CONCEPT_TEMPLATE)
+    assert.equal(isDocFilled(join(dir, ".novel/concept.md"), CONCEPT_TEMPLATE), false)
+    assert.equal(determinePhase(dir, baseConfig), "concept")
+
+    // 雛形をすべて書き換えたうえで、本文中に [Lv1] や [仮] があっても記入済みになる
+    writeFile(
+      dir,
+      ".novel/concept.md",
+      "# 『[仮] 底なし鞄』作品企画書\n\n## フック\n> [Lv1]の荷運びが最強になる話。\n",
+    )
+    assert.equal(isDocFilled(join(dir, ".novel/concept.md"), CONCEPT_TEMPLATE), true)
+    assert.equal(determinePhase(dir, baseConfig), "characters")
+  })
+
+  test("characterNameKeys は漢字氏名を姓・名で分割しつつ、カタカナ名を途中分割して誤検出しない", () => {
+    const minato = characterNameKeys("ミナト")
+    assert.deepEqual(minato.strong, ["ミナト"])
+    assert.deepEqual(minato.weak, [])
+
+    const shiori = characterNameKeys("白瀬栞")
+    assert.ok(shiori.strong.includes("白瀬"))
+    assert.ok(shiori.weak.includes("栞"))
+
+    const hanKana = characterNameKeys("白瀬しおり")
+    assert.ok(hanKana.strong.includes("白瀬"))
+    assert.ok(hanKana.strong.includes("しおり"))
+
+    const middleDot = characterNameKeys("リナ・フォレスト")
+    assert.ok(middleDot.strong.includes("リナ"))
+    assert.ok(middleDot.strong.includes("フォレスト"))
   })
 })
 

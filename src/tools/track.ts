@@ -13,6 +13,7 @@ import {
 } from "../core/utils.js"
 import type { ForeshadowEntry, NovelConfig } from "../core/utils.js"
 import { DEFAULTS } from "../core/constants.js"
+import type { ChapterUnit } from "../core/constants.js"
 import {
   sectionFromArgs,
   recordChapterOf,
@@ -79,18 +80,19 @@ export async function novelUpdateExecute(
   } else if (args.chapterNumber !== undefined) {
     target = { kind: "chapter", chapter: args.chapterNumber }
   }
+  const config = await safeReadJson<NovelConfig>(getConfigPath(dir))
+  const unit: ChapterUnit = config?.chapterUnit ?? DEFAULTS.chapterUnit
   let chapterNumber = args.chapterNumber
   if (target && target.kind !== "chapter") {
-    const config = await safeReadJson<NovelConfig>(getConfigPath(dir))
     const files = await listManuscriptFiles(dir)
     chapterNumber = recordChapterOf(target, lastChapterForRecords(files, config?.chapterCount ?? DEFAULTS.chapterCount))
   }
 
   switch (args.action) {
     case "character-state":
-      return updateCharacterState(dir, args.content, target)
+      return updateCharacterState(dir, args.content, unit, target)
     case "summary":
-      return updateSummary(dir, args.content, target)
+      return updateSummary(dir, args.content, unit, target)
     case "foreshadow":
       return updateForeshadow(dir, args.content, chapterNumber)
     case "prompt":
@@ -106,9 +108,14 @@ function refuseBroken(label: string, file: string, state: Extract<RecordFile<unk
 直してから、同じ内容をもう一度渡してください。`
 }
 
-async function updateCharacterState(dir: string, content: string, target?: ManuscriptSection): Promise<string> {
+async function updateCharacterState(
+  dir: string,
+  content: string,
+  unit: ChapterUnit,
+  target?: ManuscriptSection,
+): Promise<string> {
   if (!target) {
-    return `❌ 登場人物の状態は更新していません。どの話・節の変化かが分かりません。chapterNumber（プロローグ・幕間・エピローグなら section）を渡してください。`
+    return `❌ 登場人物の状態は更新していません。どの${unit}・節の変化かが分かりません。chapterNumber（プロローグ・幕間・エピローグなら section）を渡してください。`
   }
   const parsed = parseCharacterUpdates(content)
   if (!parsed.ok) return parsed.message
@@ -119,7 +126,7 @@ async function updateCharacterState(dir: string, content: string, target?: Manus
   const file: CharacterStateFile = current.kind === "ok" ? current.value : emptyCharacterStateFile()
 
   const key = sectionKey(target)
-  const label = sectionLabel(target)
+  const label = sectionLabel(target, unit)
   const existed = key in file.sections
   const next: CharacterStateFile = {
     ...file,
@@ -168,7 +175,7 @@ ${lines.join("\n")}`.trimEnd()
   if (lines.length > 0) report += `\n${lines.join("\n")}`
   const later = recordedSections(next).filter((r) => compareSections(r.section, target) > 0)
   if (later.length > 0) {
-    report += `\n💡 ${sectionLabel(later[0].section)}以降の記録があります。この変化は、それより後の話・節の資料にも反映されます。`
+    report += `\n💡 ${sectionLabel(later[0].section, unit)}以降の記録があります。この変化は、それより後の${unit}・節の資料にも反映されます。`
   }
   const known = stateKeyNames(file)
   const incoming = stateKeyNames({ sections: { [key]: { updates: parsed.value.updates } } })
@@ -183,7 +190,12 @@ ${lines.join("\n")}`.trimEnd()
   return report
 }
 
-async function updateSummary(dir: string, content: string, target?: ManuscriptSection): Promise<string> {
+async function updateSummary(
+  dir: string,
+  content: string,
+  unit: ChapterUnit,
+  target?: ManuscriptSection,
+): Promise<string> {
   const parsed = parseSummaryInput(content, target)
   if (!parsed.ok) return parsed.message
 
@@ -212,12 +224,12 @@ async function updateSummary(dir: string, content: string, target?: ManuscriptSe
   await safeWriteFile(filePath, next)
 
   const touched = sections
-    .map((s) => (s.section ? sectionLabel(s.section) : s.chapter !== null ? `第${s.chapter}章` : "全体の流れ"))
+    .map((s) => (s.section ? sectionLabel(s.section, unit) : s.chapter !== null ? `第${s.chapter}${unit}` : "全体の流れ"))
     .join("、")
   const recorded = summaryChapters(next)
-  const recordedExtras = summarySections(next).map(sectionLabel)
+  const recordedExtras = summarySections(next).map((s) => sectionLabel(s, unit))
   return `✅ あらすじを更新しました（${touched}）
-   記録のある章: ${recorded.length > 0 ? formatChapterRanges(recorded) : "なし"}${recordedExtras.length > 0 ? `（ほかに ${recordedExtras.join("、")}）` : ""}`
+   記録のある${unit}: ${recorded.length > 0 ? formatChapterRanges(recorded, unit) : "なし"}${recordedExtras.length > 0 ? `（ほかに ${recordedExtras.join("、")}）` : ""}`
 }
 
 async function chapterTitle(dir: string, section: ManuscriptSection): Promise<string | null> {
