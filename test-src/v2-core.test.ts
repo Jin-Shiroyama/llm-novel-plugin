@@ -165,6 +165,18 @@ describe("文章の点検（prose）: 反AIと教訓まとめ検出", () => {
     ].join("\n")
     assert.equal(checkProse(light).length, 0)
   })
+
+  test("「その瞬間／次の瞬間」は1話1回まで許容し、2回目から検出する", () => {
+    const once = "　剣を振り下ろした。次の瞬間、石壁が真っ二つに割れた。"
+    assert.equal(checkProse(once).length, 0)
+
+    const twice = [
+      "　剣を振り下ろした。次の瞬間、石壁が真っ二つに割れた。",
+      "　その瞬間、奥から赤い光が吹き上がった。",
+    ].join("\n")
+    const issues = checkProse(twice).filter((i) => i.phrase === "その瞬間")
+    assert.equal(issues.length, 1)
+  })
 })
 
 describe("企画書・舞台設定の優先枠配分（doc-sections）", () => {
@@ -193,6 +205,31 @@ describe("企画書・舞台設定の優先枠配分（doc-sections）", () => {
     assert.ok(parts.some((p) => p.label.includes("NG") && p.priority === true))
     assert.ok(parts.some((p) => p.label.includes("大まかな流れ") && !p.priority))
     assert.ok(!parts.some((p) => p.label === "基本情報"))
+  })
+
+  test("conceptParts は未記入の文体見本案内を省き、記入された文体見本は優先枠で載せる", () => {
+    const unfilled = `# 『テスト』作品企画書
+
+## 語りと文体
+- **視点**：三人称
+- **語り手のテンション**：落ち着いたシリアス
+- **特殊書式**：なし
+
+### 文体見本（任意・200〜600文字）
+> 書き手自身の文章や、理想のテンポ・語尾・一文の長さがわかる数段落をここに書きます（未記入のままでも進められます。第1話から気に入った箇所を移してもかまいません）。
+`
+    const partsUnfilled = conceptParts(unfilled, CONCEPT_TEMPLATE)
+    const styleUnfilled = partsUnfilled.find((p) => p.label.includes("文体"))
+    assert.ok(styleUnfilled && styleUnfilled.priority === true)
+    assert.ok(!styleUnfilled.content.includes("文体見本"))
+
+    const filled = `${unfilled}\n　雨が石畳を叩いていた。セシルは短剣の柄を静かに握り直す。\n`
+    const partsFilled = conceptParts(filled, CONCEPT_TEMPLATE)
+    const styleFilled = partsFilled.find((p) => p.label.includes("文体"))
+    assert.ok(styleFilled && styleFilled.priority === true)
+    assert.ok(styleFilled.content.includes("文体見本"))
+    assert.ok(styleFilled.content.includes("雨が石畳を叩いていた"))
+    assert.ok(!styleFilled.content.includes("未記入のままでも進められます"))
   })
 
   test("worldBuildingParts はギミック・ルール・約束ごとに priority を立てる", () => {

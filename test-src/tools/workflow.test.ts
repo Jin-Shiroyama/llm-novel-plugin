@@ -58,6 +58,13 @@ describe("E2E ワークフロー: ジャンル別（ラブコメ／ファンタ�
 - **全体の雰囲気**：笑える・掛け合い、ニヤニヤ・甘い
 - **シリアス度**：軽快・明るめ
 - **NG ライン（やらないこと）**：重いトラウマや教訓まとめを絶対に足さない
+
+## 語りと文体
+- **視点**：一人称（悠真）
+- **語り手のテンション**：軽快・会話多め
+
+### 文体見本（任意・200〜600文字）
+放課後の図書室は少し古い紙の匂いがする。俺は鞄を机に置いた。
 `,
     )
     writeDoc(dir, "characters/profiles.md", "# 登場人物\n\n| 名前 | 立場 | 魅力 | 状態 |\n|---|---|---|---|\n| 悠真 | 主人公 | 自炊好きツッコミ | 健在 |\n| 白瀬栞 | ヒロイン | クール×食いしん坊 | 健在 |")
@@ -98,6 +105,8 @@ describe("E2E ワークフロー: ジャンル別（ラブコメ／ファンタ�
     assert.ok(contextOut.includes("作品の核・トーン・NGライン"))
     assert.ok(contextOut.includes("重いトラウマや教訓まとめを絶対に足さない"))
     assert.ok(contextOut.includes("軽快・明るめ"))
+    assert.ok(contextOut.includes("文体見本"))
+    assert.ok(contextOut.includes("少し古い紙の匂いがする"))
     assert.ok(contextOut.includes("字下げなし"))
     assert.ok(contextOut.includes("genre-romance"))
     assert.ok(contextOut.includes("佐伯くん"))

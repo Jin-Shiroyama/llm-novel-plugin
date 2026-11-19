@@ -78,7 +78,11 @@ export function templateDocParts(content: string, template: string, opts: Sectio
     if (heading !== null && opts.skip?.test(heading)) continue
     const written = lines.filter((l) => normalizeLine(l).length > 0)
     if (written.every(isTemplateLine)) continue
-    const body = tidy(lines.filter((l) => !(isTemplateLine(l) && PLACEHOLDER.test(l))))
+    const body = tidy(
+      lines.filter(
+        (l) => !(isTemplateLine(l) && (PLACEHOLDER.test(l) || normalizeLine(l).startsWith(">"))),
+      ),
+    )
       .join("\n")
       .replace(/\n{3,}/g, "\n\n")
       .trim()

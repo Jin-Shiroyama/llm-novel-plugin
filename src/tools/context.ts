@@ -365,7 +365,11 @@ export async function novelContextExecute(
       ? `- 分量: ${perChapter}文字 ±${tolerance}%\n`
       : `- 分量: プロットに従う（1${unit}の目安は ${perChapter}文字）\n`
     context += `- 視点: ${config.narrativePerspective ?? DEFAULTS.narrativePerspective}（同じ場面の中で視点人物を入れ替えない。替えるなら区切りの行で分ける）\n`
+    const hasStyleSample = concept.some((p) => p.content.includes("文体見本"))
     context += `- トーン方針: ${toneWritingGuideline(seriousness)}\n`
+    if (hasStyleSample) {
+      context += `- 文体見本: 企画書の「文体見本」の語尾・リズム・一文の長さ・距離感を最優先でそろえる\n`
+    }
     context += `- 段落の字下げ: ${indent === "none" ? "字下げなし（Web小説スタイル）" : "地の文は全角1字下げ（会話・記号・画面行は字下げしない）"}\n`
     context += `- 参照するスキル: ${skillsList.join("、")}\n`
     context += `- 上のプロット（P0）と企画書の「トーンとNGライン」を守り、人物の魅力と「ことばづかい」を保つ\n`
