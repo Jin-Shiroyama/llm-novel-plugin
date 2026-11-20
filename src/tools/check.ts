@@ -5,6 +5,7 @@ import {
   backupPreviousDraft,
   getConfigPath,
   indentStyleOf,
+  seriousnessOf,
 } from "../core/utils.js"
 import type { NovelConfig } from "../core/utils.js"
 import {
@@ -25,12 +26,21 @@ import {
   sectionLabel,
   sectionFileName,
   sameSection,
+  compareSections,
   sectionCallArgs,
 } from "../core/sections.js"
 import type { ManuscriptSection, SectionKind } from "../core/sections.js"
 import { readGlossaryCheck } from "../core/glossary.js"
-import { checkProse, summarizeProse, formatProseIssue, PROSE_RULE_LABELS } from "../core/prose.js"
-import type { ProseIssue } from "../core/prose.js"
+import {
+  checkProse,
+  summarizeProse,
+  formatProseIssue,
+  PROSE_RULE_LABELS,
+  findCrossChapterRepeats,
+  formatCrossChapterRepeat,
+  CROSS_CHAPTER_WINDOW,
+} from "../core/prose.js"
+import type { ProseIssue, CheckProseOptions, CrossChapterRepeat } from "../core/prose.js"
 import { DEFAULTS } from "../core/constants.js"
 import type { IndentStyle, ChapterUnit } from "../core/constants.js"
 import type { ToolRuntimeContext } from "./types.js"
@@ -58,7 +68,8 @@ export async function novelCheckExecute(args: CheckArgs, ctx: ToolRuntimeContext
   }
   const config = await safeReadJson<NovelConfig>(getConfigPath(dir))
   const unit = config?.chapterUnit ?? DEFAULTS.chapterUnit
-  const files = (await listManuscriptFiles(dir)).filter(
+  const allFiles = await listManuscriptFiles(dir)
+  const files = allFiles.filter(
     (f) => target === null || sameSection(f.section, target),
   )
   if (files.length === 0) {
@@ -68,8 +79,9 @@ export async function novelCheckExecute(args: CheckArgs, ctx: ToolRuntimeContext
   }
 
   const indent = indentStyleOf(config)
+  const proseOpts: CheckProseOptions = { seriousness: seriousnessOf(config) }
   const glossary = await readGlossaryCheck(dir)
-  const results: Array<{ section: ManuscriptSection; issues: TypographyIssue[]; prose: ProseIssue[] }> = []
+  const results: Array<{ section: ManuscriptSection; text: string; issues: TypographyIssue[]; prose: ProseIssue[] }> = []
   const unreadable: ManuscriptSection[] = []
   const fixedCounts = new Map<TypographyRule, number>()
   const fixedChanges: TypographyFixChange[] = []
@@ -97,7 +109,12 @@ export async function novelCheckExecute(args: CheckArgs, ctx: ToolRuntimeContext
         fixedChanges.push(...fixed.changes)
       }
     }
-    results.push({ section: f.section, issues: checkTypography(text, { indent, glossary }), prose: checkProse(text) })
+    results.push({
+      section: f.section,
+      text,
+      issues: checkTypography(text, { indent, glossary }),
+      prose: checkProse(text, proseOpts),
+    })
   }
 
   const unreadableNote = unreadable.length > 0
@@ -107,11 +124,31 @@ export async function novelCheckExecute(args: CheckArgs, ctx: ToolRuntimeContext
     return `❌ 点検できる本文がありません。\n${unreadableNote}`
   }
 
+  let crossRepeats: CrossChapterRepeat[] = []
+  if (target !== null && results.length === 1) {
+    const priorFiles = allFiles
+      .filter((f) => compareSections(f.section, target) < 0)
+      .slice(-(CROSS_CHAPTER_WINDOW - 1))
+    const windowChapters: Array<{ label: string; text: string }> = []
+    for (const f of priorFiles) {
+      const content = await safeReadFile(f.path)
+      if (content !== null) windowChapters.push({ label: sectionLabel(f.section, unit), text: content })
+    }
+    windowChapters.push({ label: sectionLabel(results[0].section, unit), text: results[0].text })
+    crossRepeats = findCrossChapterRepeats(windowChapters, { targetIndex: windowChapters.length - 1 })
+  } else if (target === null && results.length > 1) {
+    crossRepeats = findCrossChapterRepeats(
+      results.map((r) => ({ label: sectionLabel(r.section, unit), text: r.text })),
+    )
+  }
+
   const totalFixed = [...fixedCounts.values()].reduce((a, b) => a + b, 0)
   const fixedList = [...fixedCounts.entries()]
     .map(([rule, count]) => ({ rule, count }))
     .sort((a, b) => b.count - a.count)
-  const failureNote = unconverged.length ? `❌ 自動整形が収束せず、上書きしていない本文: ${unconverged.join("、")}。元の本文を点検しています。\n` : ""
+  const failureNote = unconverged.length
+    ? `❌ 自動整形が収束せず、上書きしていない本文: ${unconverged.join("、")}。元の本文を点検しています（下の点検結果をもとに該当行を手動で整えてください）。\n`
+    : ""
   const fixNote = failureNote + (!applyFix
     ? ""
     : totalFixed > 0
@@ -120,7 +157,7 @@ export async function novelCheckExecute(args: CheckArgs, ctx: ToolRuntimeContext
 
   const all = results.flatMap((r) => r.issues)
   const scope = target === null ? describeScope(results.map((r) => r.section), unit) : sectionLabel(target, unit)
-  const proseReport = formatProseReport(results, scope, max, unit)
+  const proseReport = formatProseReport(results, crossRepeats, scope, max, unit)
   if (all.length === 0) {
     const head = unreadable.length > 0
       ? `${fixNote}⚠️ 表記の点検（${scope}）: 点検できた本文には、規約から外れた箇所はありません。\n${unreadableNote}`
@@ -151,18 +188,23 @@ export async function novelCheckExecute(args: CheckArgs, ctx: ToolRuntimeContext
 
 function formatProseReport(
   results: Array<{ section: ManuscriptSection; prose: ProseIssue[] }>,
+  crossRepeats: CrossChapterRepeat[],
   scope: string,
   max: number,
   unit: ChapterUnit,
 ): string {
   const all = results.flatMap((r) => r.prose)
-  if (all.length === 0) return ""
-  let report = `✍️ 文章の点検（${scope}）: ⚠️ 確認 ${all.length}件\n`
-  report += `（novel-writing skill の反AI・教訓まとめチェック。地の文だけを見ます。意図したものは残してかまいません。\n`
-  report += ` 直すときは語の言い換えではなく、キャラの反応・動作・語り手の声で書き直します）\n\n`
+  const totalCount = all.length + crossRepeats.length
+  if (totalCount === 0) return ""
+  let report = `✍️ 文章の点検（${scope}）: ⚠️ 確認 ${totalCount}件\n`
+  report += `（novel-writing skill の反AI・教訓まとめ・話末の定型締め・話またぎ重複チェック。地の文だけを見ます。文体見本やトーンに合う表現は残してかまいません。\n`
+  report += ` ⚠️ 0件を目的に機械的な言い換えをせず、直す箇所だけキャラの反応・動作・語り手の声で書き直します）\n\n`
   report += `## 種類ごとの件数\n`
   for (const { rule, count, detail } of summarizeProse(all)) {
     report += `- ⚠️ ${PROSE_RULE_LABELS[rule]}: ${count}件${detail ? `（${detail}）` : ""}\n`
+  }
+  if (crossRepeats.length > 0) {
+    report += `- ⚠️ 話をまたいだ繰り返し: ${crossRepeats.length}件（${crossRepeats.map((r) => r.motif).join("、")}）\n`
   }
   for (const { section, prose } of results) {
     if (prose.length === 0) continue
@@ -172,16 +214,31 @@ function formatProseReport(
       report += `…ほか${prose.length - max}件（maxIssues を上げるか、${unit}を指定して見てください）\n`
     }
   }
+  if (crossRepeats.length > 0) {
+    report += `\n## 話をまたいだ繰り返し（${crossRepeats.length}件）\n`
+    for (const repeat of crossRepeats.slice(0, max)) report += `${formatCrossChapterRepeat(repeat)}\n`
+  }
   return report
 }
 
-export function summarizeProseForSave(text: string, section: ManuscriptSection): string {
-  const issues = checkProse(text)
-  if (issues.length === 0) return ""
-  const counts = summarizeProse(issues)
-    .map(({ rule, count, detail }) => `${PROSE_RULE_LABELS[rule]} ${count}${detail ? `：${detail}` : ""}`)
-    .join("／")
-  return `✍️ 文章: ⚠️ 確認 ${issues.length}件（${counts}）\n  → novel_check(${sectionCallArgs(section)}) で箇所を見られます。語の言い換えではなく、キャラの反応・動作・語り手の声で書き直します（意図したものは残してよい）\n`
+export function summarizeProseForSave(
+  text: string,
+  section: ManuscriptSection,
+  opts?: CheckProseOptions,
+  crossRepeats: CrossChapterRepeat[] = [],
+): string {
+  const issues = checkProse(text, opts)
+  const total = issues.length + crossRepeats.length
+  if (total === 0) return ""
+  const counts = [
+    ...summarizeProse(issues).map(
+      ({ rule, count, detail }) => `${PROSE_RULE_LABELS[rule]} ${count}${detail ? `：${detail}` : ""}`,
+    ),
+    ...(crossRepeats.length > 0
+      ? [`話をまたいだ繰り返し ${crossRepeats.length}：${crossRepeats.map((r) => r.motif).join("、")}`]
+      : []),
+  ].join("／")
+  return `✍️ 文章: ⚠️ 確認 ${total}件（${counts}）\n  → novel_check(${sectionCallArgs(section)}) で箇所を見られます。文体見本やトーンに合う表現は残してよく、AI定型・教訓まとめ・話末の定型締めを優先して書き直します（⚠️ 0件を目的にしない）\n`
 }
 
 export function summarizeForSave(

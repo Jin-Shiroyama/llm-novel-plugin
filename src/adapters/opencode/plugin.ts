@@ -15,6 +15,7 @@ import {
   WORLD_BUILDING_MODES,
   INDENT_STYLES,
   CHAPTER_UNITS,
+  GENRE_SKILLS,
   DEFAULT_AUTO_FIX,
 } from "../../core/constants.js"
 import {
@@ -58,6 +59,8 @@ export function createOpenCodePlugin(pluginRoot: string): Plugin {
           args: {
             title: z.string().describe("作品タイトル（仮題可）"),
             genre: z.string().describe("ジャンル（例: 異世界ファンタジー、現代ファンタジー、ラブコメ、学園日常、SF、悪役令嬢、スローライフ、ダンジョン配信、青春コメディ）"),
+            genreSkills: z.array(z.enum(GENRE_SKILLS)).optional()
+              .describe("参照するジャンル特化スキルの明示指定（genre-fantasy / genre-romance / genre-slice-of-life / genre-sf）。省略時は genre から推定。空配列 [] でジャンルスキル無しを明示できる"),
             storyMode: z.enum(STORY_MODES).optional()
               .describe("構成の型。arc（既定・アーク連載型：10〜15話で1つの山）/ episodic（日常・ラブコメ・イベント型）/ plot（文庫1巻完結型）/ short（短編・読み切り）"),
             tone: z.string().optional()
@@ -157,7 +160,7 @@ ${FORESHADOW_EXAMPLE}`,
         }),
 
         novel_check: tool({
-          description: `本文の表記（❌ 規約違反 / ⚠️ 確認）と文章（⚠️ 反AI・教訓まとめ・文末連続・長い文）を点検し、行と字の位置つきで返す。fix: true で機械修正可能な表記を自動修正して保存できる。`,
+          description: `本文の表記（❌ 規約違反 / ⚠️ 確認）と文章（⚠️ 反AI・教訓まとめ・話末の定型締め・文末連続・長い文・話またぎ重複）を点検し、行と字の位置つきで返す。fix: true で機械修正可能な表記を自動修正して保存できる。`,
           args: {
             section: z.enum(SECTION_KINDS).optional().describe("点検する節の種類。省くと chapterNumber の話、どちらも省くと全話"),
             chapterNumber: z.number().int().positive().optional().describe("点検する話番号"),
@@ -195,7 +198,7 @@ split: true にすると投稿サイト向けの1話ずつ別ファイル＋inde
         const editor = createNovelEditorAgent()
         planner.mode = "primary"
         writer.mode = "all"
-        editor.mode = "primary"
+        editor.mode = "all"
 
         const userAgents = (config.agent ?? {}) as Record<string, Record<string, unknown>>
         config.agent = {

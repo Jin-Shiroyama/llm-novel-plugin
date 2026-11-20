@@ -13,15 +13,56 @@ import {
   chapterFileName,
   isShortForm,
   indentStyleOf,
+  seriousnessOf,
+  truncateChars,
 } from "../core/utils.js"
 import type { NovelConfig } from "../core/utils.js"
-import { sectionFromArgs, sectionFileName, sectionLabel, SECTION_NAMES } from "../core/sections.js"
-import type { SectionKind } from "../core/sections.js"
+import {
+  sectionFromArgs,
+  sectionFileName,
+  sectionLabel,
+  sectionCallArgs,
+  listManuscriptFiles,
+  compareSections,
+  SECTION_NAMES,
+} from "../core/sections.js"
+import type { ManuscriptSection, SectionKind } from "../core/sections.js"
 import { summarizeForSave, summarizeProseForSave } from "./check.js"
 import { readGlossaryCheck } from "../core/glossary.js"
 import { fixTypography, formatFixSummary, formatFixChanges } from "../core/typography.js"
+import { findCrossChapterRepeats, CROSS_CHAPTER_WINDOW } from "../core/prose.js"
 import { DEFAULTS, CHAPTER_WORD_TOLERANCE, DEFAULT_AUTO_FIX } from "../core/constants.js"
 import type { ToolRuntimeContext } from "./types.js"
+
+/** 自動整形が未収束で保存を止めたときの詳細メッセージ（該当行の抜粋と次の手順） */
+export function formatUnconvergedSaveError(
+  label: string,
+  section: ManuscriptSection,
+  rawBody: string,
+  unconvergedLines: number[],
+): string {
+  const rawLines = rawBody.split(/\r?\n/)
+  const shown = unconvergedLines.slice(0, 5)
+  const excerpts = shown
+    .map((lineNo) => {
+      const lineText = (rawLines[lineNo - 1] ?? "").replace(/　/g, "□")
+      const [clipped, truncated] = truncateChars(lineText, 60)
+      return `  - ${lineNo}行目: ${clipped}${truncated ? "…" : ""}`
+    })
+    .join("\n")
+  const more =
+    unconvergedLines.length > shown.length
+      ? `\n  …ほか${unconvergedLines.length - shown.length}行`
+      : ""
+  const callArgs = sectionCallArgs(section)
+  return (
+    `❌ ${label}は保存していません。自動整形が収束しませんでした（本文 ${unconvergedLines.join("、")}行。□ は全角スペース）。\n` +
+    `${excerpts}${more}\n` +
+    `💡 次の手順:\n` +
+    `  1. 該当行のルビ・傍点・URL・約物（括弧や三点リーダ等）を手動で整えてから保存し直す\n` +
+    `  2. いったん保存して箇所を詳しく見たい場合は novel_save_chapter(${callArgs}, autoFix: false, ...) で保存し、novel_check(${callArgs}) で確認する`
+  )
+}
 
 export interface SaveChapterArgs {
   section?: SectionKind
@@ -59,7 +100,9 @@ export async function novelSaveChapterExecute(
   const rawBody = stripChapterHeading(args.content)
   const autoFix = args.autoFix ?? DEFAULT_AUTO_FIX
   const fixResult = autoFix ? fixTypography(rawBody, { indent }) : null
-  if (fixResult?.unconvergedLines.length) return `❌ ${label}は保存していません。自動整形が収束しませんでした（本文 ${fixResult.unconvergedLines.join("、")}行）。原稿を確認してください。`
+  if (fixResult?.unconvergedLines.length) {
+    return formatUnconvergedSaveError(label, section, rawBody, fixResult.unconvergedLines)
+  }
   const body = fixResult ? fixResult.text : rawBody
   const title = normalizeChapterTitle(args.title)
 
@@ -116,7 +159,17 @@ export async function novelSaveChapterExecute(
     }
   }
   report += summarizeForSave(saved, section, undefined, indent, await readGlossaryCheck(dir))
-  report += summarizeProseForSave(saved, section)
+  const priorFiles = (await listManuscriptFiles(dir))
+    .filter((f) => compareSections(f.section, section) < 0)
+    .slice(-(CROSS_CHAPTER_WINDOW - 1))
+  const windowChapters: Array<{ label: string; text: string }> = []
+  for (const f of priorFiles) {
+    const content = await safeReadFile(f.path)
+    if (content !== null) windowChapters.push({ label: sectionLabel(f.section, unit), text: content })
+  }
+  windowChapters.push({ label: sectionLabel(section, unit), text: saved })
+  const crossRepeats = findCrossChapterRepeats(windowChapters, { targetIndex: windowChapters.length - 1 })
+  report += summarizeProseForSave(saved, section, { seriousness: seriousnessOf(config) }, crossRepeats)
 
   if (args.updateState !== false) {
     report += `\n💡 novel_update で次の記録を更新しておくと、後の話でつじつまが合わせやすくなります:\n`

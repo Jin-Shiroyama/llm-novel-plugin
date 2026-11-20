@@ -24,14 +24,20 @@ llm-novel-plugin/
 │   ├── index.ts                          # OpenCode プラグイン入口（{ id, server }）
 │   ├── core/                             # ハーネス非依存コアエンジン
 │   │   ├── index.ts                      # コア＆ツール関数の公開入口（将来の MCP 層が参照）
-│   │   ├── constants.ts                  # 既定値・構成型・シリアス度・ジャンル判定キーワード
-│   │   ├── utils.ts                      # パス・ファイル・進行判定・ジャンル推定・文字数・キャラ照合
+│   │   ├── constants.ts                  # 既定値・構成型・シリアス度・ジャンルスキル・判定キーワード
+│   │   ├── utils.ts                      # パス・ファイル・進行判定・ジャンル解決・文字数
 │   │   ├── records.ts                    # 記録検証（character-state / foreshadow / summary）
 │   │   ├── character-state.ts            # 人物状態の章・節ごと差分管理
+│   │   ├── character-names.ts            # 人物名の照合・優先度付け・同一人物解決
+│   │   ├── name-fields.ts                # キャラシートの名前欄・呼称欄パーサ
+│   │   ├── pov.ts                        # 視点人物・登場人物指定の継承解決と検証
 │   │   ├── sections.ts                   # プロローグ・幕間・エピローグ・部
 │   │   ├── ruby.ts                       # ルビ・傍点の解析と投稿先別変換
-│   │   ├── typography.ts                 # 表記点検（indent: fullwidth / none 対応）
-│   │   ├── prose.ts                      # 反AI＋教訓まとめ（preachy-ending）点検
+│   │   ├── punctuation.ts                # 約物（三点リーダ・ダッシュ等）の正規化前判定
+│   │   ├── urls.ts                       # 裸 URL・明示 URL（<...>）の範囲解析
+│   │   ├── text-analysis.ts              # 行種別・表示文字対応・保護範囲の共通解析
+│   │   ├── typography.ts                 # 表記点検と安全な自動整形（indent: fullwidth / none 対応）
+│   │   ├── prose.ts                      # 反AI・教訓まとめ・話末の定型締め・話またぎ重複点検
 │   │   ├── glossary.ts                   # 用語集の読み込み・動的抽出・禁止表記点検
 │   │   ├── canon.ts                      # 二次創作の原作資料（.novel/canon/）
 │   │   ├── publish.ts                    # 投稿情報（publish.md）の文字数・タグ数点検
@@ -67,6 +73,11 @@ llm-novel-plugin/
 │   ├── genre-slice-of-life/              # 日常系・コメディ・スローライフ特化
 │   ├── genre-sf/                         # SF・近未来・アイデア小説特化
 │   └── novel-fanfic/                     # 二次創作（原作資料・照合・権利と規約）
+├── docs/
+│   └── specs/                            # 詳細仕様
+│       ├── character-name-matching.md    # 人物名照合・解決仕様
+│       ├── pov-context.md                # 視点人物継承・資料優先枠仕様
+│       └── typography-autofix.md         # 表記点検・自動整形仕様
 ├── scripts/
 │   └── check-japanese.mjs                # 簡体字・中国語残存チェック
 └── test-src/                             # テスト（node:test）
@@ -76,7 +87,7 @@ llm-novel-plugin/
 
 ```
 .novel/
-├── config.json              # 作品設定（genre / storyMode / tone / seriousness / worldBuilding / indent / serial / sourceWork / parts / limits）
+├── config.json              # 作品設定（genre / genreSkills / storyMode / tone / seriousness / worldBuilding / indent / defaultPovCharacter / serial / sourceWork / parts / limits）
 ├── concept.md               # 作品企画書（フック・面白さの柱・お約束とひとひねり・トーン＆NGライン・文体）
 ├── world-building.md        # 舞台・設定（worldBuilding: "standard" のとき作成。world/{項目}.md に分割可）
 ├── glossary.md              # 用語集（用語｜読み｜意味｜使わない表記）

@@ -10,7 +10,7 @@ import {
   inferSeriousness,
   storyModeLabel,
   seriousnessLabel,
-  recommendedGenreSkills,
+  resolveGenreSkills,
 } from "../core/utils.js"
 import {
   fillTemplateVars,
@@ -26,19 +26,22 @@ import {
   CANON_TIMELINE_TEMPLATE,
   CANON_SETTING_TEMPLATE,
 } from "../core/templates.js"
-import { DEFAULTS, PLOT_DEFAULTS, SHORT_DEFAULTS } from "../core/constants.js"
+import { DEFAULTS, PLOT_DEFAULTS, SHORT_DEFAULTS, GENRE_SKILLS } from "../core/constants.js"
 import type {
   StoryMode,
   Seriousness,
   WorldBuildingMode,
   IndentStyle,
   ChapterUnit,
+  GenreSkill,
 } from "../core/constants.js"
 import type { ToolRuntimeContext } from "./types.js"
 
 export interface InitArgs {
   title: string
   genre: string
+  /** 参照するジャンル特化スキルの明示指定。省略時は genre から推定。空配列 [] でジャンルスキル無しを明示できる */
+  genreSkills?: GenreSkill[]
   /** 構成の型: arc（アーク連載）/ episodic（日常・イベント）/ plot（1巻完結）/ short（短編） */
   storyMode?: StoryMode
   /** 作品の雰囲気・読後感（例: 笑える・掛け合い／ニヤニヤ・甘い、ワクワク・爽快） */
@@ -90,6 +93,17 @@ export async function novelInitExecute(
   if (args.chapterCount !== undefined && !(Number.isInteger(args.chapterCount) && args.chapterCount > 0)) {
     return `❌ chapterCount は1以上の整数で指定してください（受け取ったのは ${args.chapterCount}）。`
   }
+  let explicitGenreSkills: GenreSkill[] | undefined
+  if (args.genreSkills !== undefined) {
+    if (!Array.isArray(args.genreSkills)) {
+      return `❌ genreSkills は配列で指定してください（使える値: ${GENRE_SKILLS.join(" / ")}）。`
+    }
+    const checked = resolveGenreSkills({ genre: args.genre, genreSkills: args.genreSkills })
+    if (checked.invalid.length > 0) {
+      return `❌ genreSkills に未対応のスキル名が含まれています: ${checked.invalid.join("、")}（使える値: ${GENRE_SKILLS.join(" / ")}）。`
+    }
+    explicitGenreSkills = checked.skills
+  }
 
   const title = args.title.trim()
   const genre = args.genre.trim()
@@ -121,6 +135,7 @@ export async function novelInitExecute(
     ...CONFIG_TEMPLATE,
     title,
     genre,
+    ...(explicitGenreSkills !== undefined ? { genreSkills: explicitGenreSkills } : {}),
     storyMode,
     tone,
     seriousness,
@@ -176,11 +191,15 @@ export async function novelInitExecute(
       ? `構成: ${storyModeLabel(storyMode)}／連載（目安 全${chapterCount}${chapterUnit}・1${chapterUnit}あたり約${perChapter.toLocaleString("ja-JP")}文字。超えて書いてよい）`
       : `構成: ${storyModeLabel(storyMode)}／全${chapterCount}${chapterUnit}（1${chapterUnit}あたり約${perChapter.toLocaleString("ja-JP")}文字）`
 
-  const genreSkills = recommendedGenreSkills(genre)
+  const resolvedSkills = resolveGenreSkills({ genre, genreSkills: explicitGenreSkills })
   const skillHint = [
-    ...genreSkills,
+    ...resolvedSkills.skills,
     ...(sourceWork ? ["novel-fanfic"] : []),
   ]
+  const skillLine =
+    skillHint.length > 0
+      ? `\n  参照ジャンルスキル: ${skillHint.join("、")}${resolvedSkills.source === "config" ? "（明示指定）" : "（ジャンルから推定）"}`
+      : `\n  参照ジャンルスキル: なし（共通スキル novel-writing のみ。必要なら config.json の genreSkills で指定可）`
   const worldFileLine = worldBuilding === "standard" && !short ? "  ├── world-building.md    (舞台・設定)\n" : ""
   const nextStepWorld =
     worldBuilding === "standard" && !short
@@ -206,7 +225,7 @@ ${worldFileLine}  ├── glossary.md          (用語集。造語・固有名
   シリアス度: ${seriousnessLabel(seriousness)}${sourceWork ? `\n  二次創作: 原作『${sourceWork}』` : ""}
   ${chaptersLine}
   視点: ${perspective}
-  段落の字下げ: ${indent === "none" ? "字下げなし（Web小説スタイル）" : "全角1字下げ"}${skillHint.length > 0 ? `\n  おすすめスキル: ${skillHint.join("、")}` : ""}
+  段落の字下げ: ${indent === "none" ? "字下げなし（Web小説スタイル）" : "全角1字下げ"}${skillLine}
 
 📝 次にやること:${sourceWork ? "\n  0. 原作の資料（.novel/canon/overview.md・timeline.md・setting.md・原作キャラ）を先に整えます" : ""}
   1. 企画書（.novel/concept.md）で、フック・面白さの柱・お約束とひとひねり・NG ラインを固めます

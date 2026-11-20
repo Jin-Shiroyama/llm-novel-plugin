@@ -34,7 +34,7 @@ describe("OpenCode アダプタ層とハーネス非依存性", () => {
 
     assert.equal(config.agent["novel-planner"].mode, "primary")
     assert.equal(config.agent["novel-writer"].mode, "all")
-    assert.equal(config.agent["novel-editor"].mode, "primary")
+    assert.equal(config.agent["novel-editor"].mode, "all")
     // 利用者の model 指定で webfetch: "deny" や bash: "deny" が消えないこと
     assert.equal(config.agent["novel-writer"].model, "custom/model")
     assert.equal(config.agent["novel-writer"].permission.webfetch, "deny")

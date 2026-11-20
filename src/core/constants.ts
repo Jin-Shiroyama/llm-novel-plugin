@@ -25,6 +25,15 @@ export type IndentStyle = (typeof INDENT_STYLES)[number]
 export const CHAPTER_UNITS = ["話", "章"] as const
 export type ChapterUnit = (typeof CHAPTER_UNITS)[number]
 
+/** ジャンル特化スキル名 */
+export const GENRE_SKILLS = [
+  "genre-fantasy",
+  "genre-romance",
+  "genre-slice-of-life",
+  "genre-sf",
+] as const
+export type GenreSkill = (typeof GENRE_SKILLS)[number]
+
 /** 保存時の自動整形。適用規則とは独立した既定値。 */
 export const DEFAULT_AUTO_FIX = true
 

@@ -22,7 +22,8 @@ import {
   seriousnessOf,
   seriousnessLabel,
   indentStyleOf,
-  recommendedGenreSkills,
+  resolveGenreSkills,
+  chapterTitleFromHeading,
 } from "../core/utils.js"
 import type {
   NovelConfig,
@@ -56,6 +57,7 @@ import {
   previousManuscriptFile,
   recordChapterOf,
   sameSection,
+  compareSections,
   parseParts,
   partOfChapter,
   partName,
@@ -73,6 +75,11 @@ import type { LimitKey, Seriousness, ChapterUnit } from "../core/constants.js"
 import { buildCharacterIndex, characterRanks, resolveCharacterName } from "../core/character-names.js"
 import type { CharacterIndex } from "../core/character-names.js"
 import { resolvePovContext, withoutPovFields } from "../core/pov.js"
+import {
+  extractChapterEnding,
+  findCrossChapterRepeats,
+  CROSS_CHAPTER_WINDOW,
+} from "../core/prose.js"
 import type { ToolRuntimeContext } from "./types.js"
 
 export interface ContextArgs {
@@ -286,6 +293,52 @@ export async function novelContextExecute(
     context += `## 📖 ${prevName}の末尾${limit.toLocaleString("ja-JP")}文字 (P1 — つなぎ)\n${tail}\n\n`
   }
 
+  // --- 直近の締め方・繰り返しやすい表現（P2 — 3話目以降でマンネリを防ぐ） ---
+  const recentPriorFiles = manuscriptFiles
+    .filter((f) => compareSections(f.section, section) < 0)
+    .slice(-CROSS_CHAPTER_WINDOW)
+  if (recentPriorFiles.length >= 2) {
+    const recentChapters: Array<{ label: string; title: string; text: string }> = []
+    for (const f of recentPriorFiles) {
+      const text =
+        prev && sameSection(f.section, prev.section) && prevText !== null
+          ? prevText
+          : await safeReadFile(f.path)
+      if (text === null) continue
+      recentChapters.push({
+        label: sectionLabel(f.section, unit),
+        title: chapterTitleFromHeading(text),
+        text,
+      })
+    }
+    const endingLines = recentChapters
+      .map((c) => {
+        const ending = extractChapterEnding(c.text)
+        if (!ending) return ""
+        const heading = c.title ? `${c.label}「${c.title}」` : c.label
+        return `- ${heading}: ${ending}`
+      })
+      .filter(Boolean)
+    const repeats = findCrossChapterRepeats(
+      recentChapters.map((c) => ({ label: c.label, text: c.text })),
+    )
+    if (endingLines.length >= 2 || repeats.length > 0) {
+      context += `## 🔚 直近の締め方・繰り返しやすい表現 (P2 — マンネリ防止)\n`
+      if (endingLines.length >= 2) {
+        context += `直近の締め（同じ引きの型や終わり方が3回続かないよう変えます）:\n`
+        context += `${endingLines.join("\n")}\n`
+      }
+      if (repeats.length > 0) {
+        if (endingLines.length >= 2) context += "\n"
+        context += `直近で重なっている定型仕草（今話は別の動作・反応を優先します）:\n`
+        for (const r of repeats) {
+          context += `- 「${r.motif}」: ${r.chapters.join("・")}（計${r.totalCount}回）— ${r.advice}\n`
+        }
+      }
+      context += "\n"
+    }
+  }
+
   // --- 原作の資料（二次創作。P1） ---
   const sourceWork = sourceWorkOf(config)
   const canonParts = await readCanonParts(dir, chapterText)
@@ -377,7 +430,7 @@ export async function novelContextExecute(
     const tolerance = Math.round(CHAPTER_WORD_TOLERANCE * 100)
     const seriousness = seriousnessOf(config)
     const indent = indentStyleOf(config)
-    const genreSkills = recommendedGenreSkills(config.genre)
+    const genreSkills = resolveGenreSkills(config).skills
     const skillsList = ["novel-writing", ...genreSkills, ...(sourceWork ? ["novel-fanfic"] : [])]
 
     context += `## ✍️ 書くときの条件\n`

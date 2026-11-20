@@ -29,6 +29,7 @@ import {
   toKanjiNumber,
   resolveLimit,
   listCharacterDocs,
+  resolveGenreSkills,
 } from "../core/utils.js"
 import type { NovelConfig, Phase } from "../core/utils.js"
 import {
@@ -55,7 +56,7 @@ import {
 import type { ManuscriptSection } from "../core/sections.js"
 import { sourceWorkOf, hasCanonOverview } from "../core/canon.js"
 import { parsePublishInfo, describePublishInfo, publishIssues } from "../core/publish.js"
-import { DEFAULTS } from "../core/constants.js"
+import { DEFAULTS, GENRE_SKILLS } from "../core/constants.js"
 import { CONCEPT_TEMPLATE, WORLD_BUILDING_TEMPLATE, CHARACTER_PROFILES_TEMPLATE } from "../core/templates.js"
 import { buildCharacterIndex } from "../core/character-names.js"
 import { parseNameFields } from "../core/name-fields.js"
@@ -112,9 +113,17 @@ export async function novelStatusExecute(
 
   let report = `📊 作品の進行状況\n${"=".repeat(40)}\n\n`
 
+  const resolvedSkills = resolveGenreSkills(config)
   if (config) {
     report += `📖 タイトル: ${config.title}\n`
     report += `🏷️  ジャンル: ${config.genre}\n`
+    const skillsNote =
+      resolvedSkills.skills.length > 0
+        ? `${resolvedSkills.skills.join("、")}（${resolvedSkills.source === "config" ? "config.json で指定" : "ジャンルから推定"}）`
+        : resolvedSkills.source === "config"
+          ? "なし（config.json で指定／共通スキル novel-writing のみ）"
+          : "なし（ジャンルから該当なし／共通スキル novel-writing のみ。必要なら config.json の genreSkills で指定可）"
+    report += `🧩 ジャンルスキル: ${skillsNote}\n`
     report += `🧭 構成の型: ${storyModeLabel(storyModeOf(config))}\n`
     if (config.tone) report += `🎨 雰囲気・トーン: ${config.tone}\n`
     report += `🎚️  シリアス度: ${seriousnessLabel(seriousnessOf(config))}\n`
@@ -269,6 +278,14 @@ export async function novelStatusExecute(
   }
 
   const issues: string[] = []
+  if (resolvedSkills.error) {
+    issues.push(resolvedSkills.error)
+  }
+  if (resolvedSkills.invalid.length > 0) {
+    issues.push(
+      `config.json の genreSkills に未対応のスキル名があります: ${resolvedSkills.invalid.join("、")}（使える値: ${GENRE_SKILLS.join(" / ")}）`,
+    )
+  }
   const characterDocs = await listCharacterDocs(dir)
   const index = buildCharacterIndex(characterDocs)
   issues.push(...await validatePovReferences(dir, config, index))

@@ -7,6 +7,7 @@ import {
   inferWorldBuilding,
   inferSeriousness,
   recommendedGenreSkills,
+  resolveGenreSkills,
   determinePhase,
   isDocFilled,
   characterNameKeys,
@@ -15,7 +16,12 @@ import {
 } from "../src/core/utils.js"
 import type { NovelConfig } from "../src/core/utils.js"
 import { checkTypography, fixTypography, formatFixChanges } from "../src/core/typography.js"
-import { checkProse } from "../src/core/prose.js"
+import {
+  checkProse,
+  scaledPhraseLimit,
+  extractChapterEnding,
+  findCrossChapterRepeats,
+} from "../src/core/prose.js"
 import { conceptParts, worldBuildingParts } from "../src/core/doc-sections.js"
 import { CONCEPT_TEMPLATE, WORLD_BUILDING_TEMPLATE } from "../src/core/templates.js"
 import { listPromptTemplates, buildPromptVars, getPromptTemplate } from "../src/core/prompts.js"
@@ -64,6 +70,39 @@ describe("ジャンル推定とスキル案内", () => {
 
   test("短編はジャンルに関わらず worldBuilding: minimal", () => {
     assert.equal(inferWorldBuilding("異世界ファンタジー", "short"), "minimal")
+  })
+
+  test("resolveGenreSkills は config.genreSkills の明示指定を優先し、未対応名と空配列を区別する", () => {
+    assert.deepEqual(resolveGenreSkills({ genre: "悪役令嬢" }), {
+      skills: ["genre-fantasy"],
+      source: "inferred",
+      invalid: [],
+    })
+    assert.deepEqual(
+      resolveGenreSkills({ genre: "悪役令嬢", genreSkills: ["genre-fantasy", "genre-romance", "genre-fantasy"] }),
+      {
+        skills: ["genre-fantasy", "genre-romance"],
+        source: "config",
+        invalid: [],
+      },
+    )
+    assert.deepEqual(resolveGenreSkills({ genre: "ラブコメ", genreSkills: [] }), {
+      skills: [],
+      source: "config",
+      invalid: [],
+    })
+    assert.deepEqual(
+      resolveGenreSkills({ genre: "ミステリー", genreSkills: ["genre-sf", "genre-unknown" as any] }),
+      {
+        skills: ["genre-sf"],
+        source: "config",
+        invalid: ["genre-unknown"],
+      },
+    )
+    const nonArray = resolveGenreSkills({ genre: "ラブコメ", genreSkills: "genre-romance" as any })
+    assert.deepEqual(nonArray.skills, ["genre-romance"])
+    assert.equal(nonArray.source, "inferred")
+    assert.ok(nonArray.error && nonArray.error.includes("配列で指定"))
   })
 })
 
@@ -357,6 +396,143 @@ describe("文章の点検（prose）: 反AIと教訓まとめ検出", () => {
     ].join("\n")
     const issues = checkProse(twice).filter((i) => i.phrase === "その瞬間")
     assert.equal(issues.length, 1)
+  })
+
+  test("文字数に応じて許容回数が3,000字基準でスケールし、serious では1文100字まで許容する", () => {
+    assert.equal(scaledPhraseLimit(0, 12000), 0)
+    assert.equal(scaledPhraseLimit(1, 3000), 1)
+    assert.equal(scaledPhraseLimit(1, 6000), 2)
+    assert.equal(scaledPhraseLimit(3, 12000), 12)
+
+    const filler = "　雨が石畳を濡らして、通りに明かりが灯る。".repeat(300) // 約6,000字
+    const longTwice = `${filler}\n　次の瞬間、鐘が鳴った。\n　その瞬間、門が開いた。`
+    assert.equal(checkProse(longTwice).filter((i) => i.phrase === "その瞬間").length, 0)
+
+    const longThrice = `${longTwice}\n　この瞬間、風が止んだ。`
+    assert.equal(checkProse(longThrice).filter((i) => i.phrase === "その瞬間").length, 1)
+
+    const ninetyChars = `　${"あ".repeat(90)}。`
+    const overHundredChars = `　${"あ".repeat(105)}。`
+    assert.equal(checkProse(ninetyChars).filter((i) => i.rule === "long-sentence").length, 1)
+    assert.equal(checkProse(ninetyChars, { seriousness: "serious" }).filter((i) => i.rule === "long-sentence").length, 0)
+    assert.equal(checkProse(overHundredChars, { seriousness: "serious" }).filter((i) => i.rule === "long-sentence").length, 1)
+  })
+
+  test("話末（末尾3行）の「悪くない」締め・内省モノローグ締めだけを closing-cliche として検出し、途中や会話は誤検出しない", () => {
+    const badClosing1 = [
+      "　放課後の昇降口を出た。",
+      "　夕焼けの坂道を歩きながら、ポケットの鍵を鳴らす。",
+      "　こんな毎日も、悪くないな。",
+    ].join("\n")
+    assert.equal(checkProse(badClosing1).filter((i) => i.rule === "closing-cliche").length, 1)
+
+    const badClosing2 = [
+      "　駅前の信号が青に変わった。",
+      "　そう思いながら、俺は自転車のペダルを踏み込んだ。",
+    ].join("\n")
+    assert.equal(checkProse(badClosing2).filter((i) => i.rule === "closing-cliche").length, 1)
+
+    const badClosing3 = "　悪くない気分だ。\n　これも悪くない……かもしれない。"
+    assert.equal(checkProse(badClosing3).filter((i) => i.rule === "closing-cliche").length, 2)
+
+    // 話の途中（末尾3行より前）や文中修飾、会話内の「悪くない」は誤検出しない
+    const safeText = [
+      "　味自体は悪くないのに、見た目だけが妙に派手だ。",
+      "　そう思いながら皿を下げた。",
+      "　店を出て交差点を曲がる。",
+      "　遠くで踏切の音が鳴った。",
+      "「これ、悪くないね」",
+      "　先輩はそう笑ってコンビニの袋を揺らした。",
+    ].join("\n")
+    assert.equal(checkProse(safeText).filter((i) => i.rule === "closing-cliche").length, 0)
+  })
+
+  test("高シグナルな仕草・ぼかし語尾（肩をすくめる・苦笑・気がした）は許容内を通し連発だけ拾う", () => {
+    const okOnce = [
+      "　先輩は肩をすくめた。",
+      "　俺は苦笑してノートを閉じる。",
+      "　少し寒い気がした。風の音が強くなった気がした。",
+    ].join("\n")
+    assert.equal(checkProse(okOnce).length, 0)
+
+    const overused = [
+      okOnce,
+      "　もう一度、先輩は肩をすくめた。",
+      "　俺も小さく笑った。",
+      "　何か忘れている気がした。",
+    ].join("\n")
+    const phrases = checkProse(overused).map((i) => i.phrase)
+    assert.ok(phrases.includes("肩をすくめる"))
+    assert.ok(phrases.includes("小さく笑う・苦笑"))
+    assert.ok(phrases.includes("〜気がした"))
+  })
+
+  test("extractChapterEnding と findCrossChapterRepeats が締め抽出と話またぎ重複を正しく判定する", () => {
+    const ch = "# 第1章 放課後\n\n　チャイムが鳴った。\n\n「また明日な」\n　夕焼けの廊下を歩き出した。\n\n◇\n"
+    assert.equal(extractChapterEnding(ch), "「また明日な」 ／ 夕焼けの廊下を歩き出した。")
+
+    // 陰性: ありふれた副詞・仕草（そっと・ゆっくりと・静かに・ため息・首を傾げる）や目立つ仕草でも各話1回×3話では鳴らない
+    const normalThree = [
+      { label: "第1話", text: "　彼はそっと扉を閉め、ゆっくりと歩き出した。静かにため息をつき、首を傾げる。肩をすくめた。" },
+      { label: "第2話", text: "　彼女はそっと本を置き、ゆっくりと顔を上げた。静かにため息をつき、首を傾げる。肩をすくめた。" },
+      { label: "第3話", text: "　俺はそっと窓を開け、ゆっくりと背伸びした。静かにため息をつき、首を傾げる。肩をすくめた。" },
+    ]
+    assert.deepEqual(findCrossChapterRepeats(normalThree), [])
+
+    // 陽性1: 近い5話のうち3話以上かつ計5回以上（2+1+2）は検出。会話文や間隔の空いた使用は誤検出しない
+    const chapters = [
+      { label: "第1話", text: "　彼は肩をすくめた。もう一度、肩をすくめた。\n　俺は目を細めた。" },
+      { label: "第2話", text: "「肩をすくめるなよ」「また肩をすくめるなよ」\n　窓の外では雨が降っていた。" },
+      { label: "第3話", text: "　彼女は肩をすくめた。" },
+      { label: "第4話", text: "　再び彼は肩をすくめた。呆れて肩をすくめた。" },
+      { label: "第5話", text: "　朝の光が差し込んだ。" },
+      { label: "第6話", text: "　俺はまた目を細めた。二度目を細めた。" },
+      { label: "第7話", text: "　静かな午後だった。" },
+      { label: "第8話", text: "　最後に目を細めた。もう一度目を細めた。" },
+    ]
+    const allRepeats = findCrossChapterRepeats(chapters)
+    assert.equal(allRepeats.length, 1)
+    assert.equal(allRepeats[0].motif, "肩をすくめる")
+    assert.deepEqual(allRepeats[0].chapters, ["第1話", "第3話", "第4話"])
+    assert.equal(allRepeats[0].totalCount, 5)
+
+    // targetIndex 指定時: 対象話に出ていない表現は報告しない
+    assert.deepEqual(findCrossChapterRepeats(chapters, { targetIndex: 4 }), [])
+    const atCh4 = findCrossChapterRepeats(chapters, { targetIndex: 3 })
+    assert.equal(atCh4.length, 1)
+    assert.equal(atCh4[0].motif, "肩をすくめる")
+
+    // 陽性2: 目立つ仕草が5話連続で毎話1回ずつ（5話・計5回）出れば検出する
+    const fiveStreak = [1, 2, 3, 4, 5].map((n) => ({
+      label: `第${n}話`,
+      text: "　彼は苦笑して席を立った。",
+    }))
+    const streakRepeats = findCrossChapterRepeats(fiveStreak)
+    assert.equal(streakRepeats.length, 1)
+    assert.equal(streakRepeats[0].motif, "苦笑・小さく笑う")
+    assert.equal(streakRepeats[0].totalCount, 5)
+
+    // 陰性2: 「目を細める」と驚き（「目を見開く・目を丸くする」）は別分類のため、5話で混ぜて使っても誤検出しない
+    const mixedEyes = [
+      { label: "第1話", text: "　先輩は眩しそうに目を細めた。" },
+      { label: "第2話", text: "　彼女は思わずではなく素直に目を見開いた。" },
+      { label: "第3話", text: "　俺は画面を見て目を丸くした。" },
+      { label: "第4話", text: "　遠くの塔へ視線を送り、目を細めた。" },
+      { label: "第5話", text: "　予想外の言葉に目を見開いた。" },
+    ]
+    assert.deepEqual(findCrossChapterRepeats(mixedEyes), [])
+
+    // 陽性3: 驚きの表現（「目を見開く」「目を丸くする」）だけで5話連続・計5回なら検出する
+    const surpriseStreak = [
+      { label: "第1話", text: "　目を見開いた。" },
+      { label: "第2話", text: "　目を丸くした。" },
+      { label: "第3話", text: "　目を見開いた。" },
+      { label: "第4話", text: "　目を丸くした。" },
+      { label: "第5話", text: "　目を見開いた。" },
+    ]
+    const surpriseRepeats = findCrossChapterRepeats(surpriseStreak)
+    assert.equal(surpriseRepeats.length, 1)
+    assert.equal(surpriseRepeats[0].motif, "目を見開く・目を丸くする")
   })
 })
 

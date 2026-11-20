@@ -11,6 +11,7 @@ import {
   DEFAULTS,
   LIMITS,
   FORESHADOW_LOOKAHEAD,
+  GENRE_SKILLS,
   MINIMAL_WORLD_GENRE_KEYWORDS,
   LIGHT_TONE_GENRE_KEYWORDS,
   FANTASY_GENRE_KEYWORDS,
@@ -25,6 +26,7 @@ import type {
   WorldBuildingMode,
   IndentStyle,
   ChapterUnit,
+  GenreSkill,
 } from "./constants.js"
 import { stripRuby } from "./ruby.js"
 import { parseNameFields } from "./name-fields.js"
@@ -690,6 +692,8 @@ export type NovelLimits = Partial<Record<LimitKey, number>>
 export interface NovelConfig {
   title: string
   genre: string
+  /** 使用するジャンル特化スキルの明示指定。省略時は genre から推定。空配列 [] でジャンルスキル無しを明示できる */
+  genreSkills?: GenreSkill[]
   /** 構成の型: arc（アーク連載）/ episodic（日常・イベント）/ plot（1巻完結）/ short（短編） */
   storyMode?: StoryMode
   /** 作品の雰囲気・読後感（例: 笑える・掛け合い／ニヤニヤ・甘い、ワクワク・爽快） */
@@ -821,15 +825,58 @@ export function inferSeriousness(genre: string | undefined | null): Seriousness 
 }
 
 /** ジャンルに対応する特化スキル名の一覧を返す（該当が無ければ空配列） */
-export function recommendedGenreSkills(genre: string | undefined | null): string[] {
+export function recommendedGenreSkills(genre: string | undefined | null): GenreSkill[] {
   const norm = normalizeGenre(genre)
   if (!norm) return []
-  const skills: string[] = []
+  const skills: GenreSkill[] = []
   if (FANTASY_GENRE_KEYWORDS.some((k) => norm.includes(k))) skills.push("genre-fantasy")
   if (ROMANCE_GENRE_KEYWORDS.some((k) => norm.includes(k))) skills.push("genre-romance")
   if (SLICE_OF_LIFE_GENRE_KEYWORDS.some((k) => norm.includes(k))) skills.push("genre-slice-of-life")
   if (SF_GENRE_KEYWORDS.some((k) => norm.includes(k))) skills.push("genre-sf")
   return skills
+}
+
+export interface ResolvedGenreSkills {
+  skills: GenreSkill[]
+  source: "config" | "inferred"
+  invalid: string[]
+  /** config.genreSkills が配列以外で書かれている場合の診断メッセージ */
+  error?: string
+}
+
+const VALID_GENRE_SKILLS: ReadonlySet<string> = new Set(GENRE_SKILLS)
+
+/** 作品設定から使用するジャンル特化スキルを解決する（config.genreSkills が配列なら優先） */
+export function resolveGenreSkills(
+  config: Pick<NovelConfig, "genre" | "genreSkills"> | null | undefined,
+): ResolvedGenreSkills {
+  if (config && config.genreSkills !== undefined && !Array.isArray(config.genreSkills)) {
+    return {
+      skills: recommendedGenreSkills(config.genre),
+      source: "inferred",
+      invalid: [],
+      error: `config.json の genreSkills は配列で指定してください（例: ["genre-fantasy", "genre-romance"]）。現在はジャンルから推定しています`,
+    }
+  }
+  if (config && Array.isArray(config.genreSkills)) {
+    const skills: GenreSkill[] = []
+    const invalid: string[] = []
+    for (const item of config.genreSkills as unknown[]) {
+      if (typeof item !== "string") {
+        invalid.push(String(item))
+        continue
+      }
+      const trimmed = item.trim()
+      if (!trimmed) continue
+      if (VALID_GENRE_SKILLS.has(trimmed)) {
+        if (!skills.includes(trimmed as GenreSkill)) skills.push(trimmed as GenreSkill)
+      } else {
+        invalid.push(trimmed)
+      }
+    }
+    return { skills, source: "config", invalid }
+  }
+  return { skills: recommendedGenreSkills(config?.genre), source: "inferred", invalid: [] }
 }
 
 export function storyModeOf(config: Pick<NovelConfig, "storyMode"> | null | undefined): StoryMode {
