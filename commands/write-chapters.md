@@ -30,7 +30,7 @@ agent: novel-planner
 第{N}話を書いてください。あなたのプロンプトの手順どおりに最後までやり切ります。
 
 1. novel_context(chapterNumber: {N}) で資料をそろえ、「参照するスキル」を読み込む
-2. 資料の条件・文体見本・トーン＆NGライン・ことばづかいに沿って1話を書き、novel_save_chapter(chapterNumber: {N}, ...) で保存する（既定では本文を変更せず点検する。自動整形は autoFix: true を明示した場合のみ）
+2. 資料の条件・視点人物・文体見本・トーン＆NGライン・ことばづかいに沿って1話を書き、novel_save_chapter(chapterNumber: {N}, ...) で保存する（自動整形は autoFix が有効な場合に適用する。省略時の動作はツールの引数説明、規則は novel-writing skill を参照）
 3. 保存結果に表記の ❌ がある場合は novel_check で確認して直し、文章の ⚠️ も必要分だけ書き直す（保存し直しは最大2回まで）
 4. novel_update で character-state・summary・foreshadow を更新する（全体の流れの ⚠️ が出ていれば更新）
 5. シーン一覧がある話なら書いたシーンを [x] にする

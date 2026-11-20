@@ -1,4 +1,5 @@
 /** 人物名の出現と同一人物の解決。書かれた手がかり以外は生成しない。 */
+import { parseNameFields } from "./name-fields.js"
 export interface NameDocument {
   label: string
   content: string
@@ -18,16 +19,7 @@ export type NameResolution =
 
 /** 「名前」欄だけを読む。括弧内の読みは呼称に明記された場合だけ使う。 */
 export function writtenNameHints(content: string): string[] {
-  const hints = new Set<string>()
-  for (const line of content.split("\n")) {
-    const m = line.match(/^\s*(?:[-*・]\s*)?(?:\*\*)?名前(?:\*\*)?\s*[：:]\s*(.*)$/)
-    if (!m) continue
-    const value = m[1].replace(/\*\*|`/g, "").replace(/（[^）]*）|\([^)]*\)/g, "").trim()
-    if (!value || /^\[.*\]$/.test(value)) continue
-    hints.add(value)
-    for (const piece of value.split(/[\s　・]+/)) if (piece) hints.add(piece)
-  }
-  return [...hints]
+  return parseNameFields(content).nameHints
 }
 
 /** 旧公開関数も明示的な空白・中黒だけを区切りとして扱う。 */
@@ -41,6 +33,7 @@ export function buildCharacterIndex(docs: NameDocument[]): CharacterIndex {
   const byName = new Map<string, Set<string>>()
   for (const doc of docs) {
     const name = doc.label.trim()
+    if (!name) continue
     const hints = byName.get(name) ?? new Set<string>()
     const keys = characterNameKeys(name, [...(doc.aliases ?? []), ...writtenNameHints(doc.content)])
     for (const key of [...keys.strong, ...keys.weak]) hints.add(key)
@@ -66,15 +59,21 @@ export interface CharacterMention {
 }
 
 export function findCharacterMentions(index: CharacterIndex, text: string): CharacterMention[] {
-  const hints = [...new Set(index.flatMap(c => c.hints))].sort((a, b) => b.length - a.length)
+  const owners = new Map<string, Set<string>>()
+  for (const person of index) for (const hint of person.hints) {
+    if (!hint.trim() || !person.name.trim()) continue
+    const names = owners.get(hint) ?? new Set<string>()
+    names.add(person.name.trim())
+    owners.set(hint, names)
+  }
+  const hints = [...owners.keys()].sort((a, b) => b.length - a.length)
   const mentions: CharacterMention[] = []
   for (let i = 0; i < text.length;) {
     // 長い名前を先に消費し、正式名の中の共通の姓で別人を拾わない。
     const hint = hints.find(h => text.startsWith(h, i))
     if (!hint) { i++; continue }
-    const resolved = resolveCharacterName(index, hint)
-    const candidates = resolved.kind === "ambiguous" ? resolved.candidates : [resolved.name]
-    const strength = [...hint].length === 1 || resolved.kind === "ambiguous" ? "weak" : "strong"
+    const candidates = owners.get(hint)!
+    const strength = [...hint].length === 1 || candidates.size > 1 ? "weak" : "strong"
     for (const name of candidates) mentions.push({ name, hint, offset: i, strength })
     i += hint.length
   }
@@ -95,5 +94,5 @@ export function characterRanks(index: CharacterIndex, current: string, previous 
 
 export function selectCharacterDocs<T extends NameDocument>(docs: T[], current: string, previous = ""): T[] {
   const ranks = characterRanks(buildCharacterIndex(docs), current, previous)
-  return docs.filter(d => ranks.has(d.label)).sort((a, b) => ranks.get(a.label)! - ranks.get(b.label)!)
+  return docs.filter(d => ranks.has(d.label.trim())).sort((a, b) => ranks.get(a.label.trim())! - ranks.get(b.label.trim())!)
 }

@@ -16,7 +16,7 @@ export function createNovelWriterAgent(): Record<string, unknown> {
 ## 使うツール
 
 - **novel_context**: 書く前に必ず呼ぶ。プロット・トーン＆NGライン・文体見本・キャラ・ことばづかい・状態・前話の末尾・設定・用語集・あらすじ・伏線がまとめて返る
-- **novel_save_chapter**: 書き終えた1話を保存する（文字数と目安の比較・旧稿退避・表記/文章チェックが走る。自動整形は autoFix: true を明示した場合のみ）
+- **novel_save_chapter**: 書き終えた1話を保存する（文字数と目安の比較・旧稿退避・表記/文章チェックが走る。自動整形は autoFix が有効な場合に適用し、省略時の動作はツールの引数説明を参照する）
 - **novel_update**: 保存後に記録を更新する（\`character-state\` / \`summary\` / \`foreshadow\`。JSON ファイルを Edit で直接書き換えない）
 - **novel_check**: 残った表記の ❌ や文章の ⚠️ を確認する（\`fix: true\` で既存ファイルの機械修正可能な表記も自動整形できる）
 - **novel_export**: 原稿を書き出す（頼まれたとき）
@@ -32,8 +32,8 @@ export function createNovelWriterAgent(): Record<string, unknown> {
 1. **novel_context** で資料をそろえる（\`chapterNumber\` または \`section\`）
 2. 「書くときの条件」の **参照するスキル** を確認し、\`novel-writing\` と該当ジャンルスキル（\`genre-fantasy\` / \`genre-romance\` / \`genre-slice-of-life\` / \`genre-sf\` / \`novel-fanfic\`）を読み込む
 3. 資料を読む：プロット（P0）、**企画書のフック・面白さ・トーン＆NGライン・文体見本**、キャラの魅力と **🗣️ ことばづかい**、現在の状態、前の話の末尾、用語集、伏線
-4. 1話を通して書く。分量は「この話の目安」（±15%）に収める
-5. **novel_save_chapter** で保存する（本文に見出し行を入れない。既定では本文を変更せず点検する）
+4. 1話を通して書く。分量は「この話の目安」（±15%）に収め、資料の「視点人物」に従う。未解決の視点は推測せず指定を確認する
+5. **novel_save_chapter** で保存する（本文に見出し行を入れない。表記規則と自動整形の適用条件は novel-writing skill に従う）
    - 保存結果の「📝 表記」に ❌ がある場合は \`novel_check\` で確認して直し、保存し直す
    - 「✍️ 文章」の ⚠️（反AI定型や教訓まとめ）は箇所を見て、直すものはキャラの反応・動作・語り手の声で書き直す（保存し直しは最大 2 回まで）
 6. **novel_update** で \`character-state\`（変化なしなら \`{"updates": []}\`）・\`summary\`（この話だけ）・\`foreshadow\` を更新する。あらすじに「全体の流れ」更新の ⚠️ が出ていれば \`.novel/summary.md\` を読んで \`## 全体の流れ\` も更新する

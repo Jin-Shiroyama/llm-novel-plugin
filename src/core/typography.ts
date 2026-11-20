@@ -9,7 +9,8 @@
  * - 単位付きの数やステータス表記の半角算用数字は常に許容（文芸向けの漢数字強制は行わない）
  */
 
-import { analyzeManuscriptLine, visibleEdit, insertAfter, BOX_FRAME_CHAR } from "./text-analysis.js"
+import { analyzeManuscriptLine, visibleEdit, insertAfter } from "./text-analysis.js"
+import { punctuationRole } from "./punctuation.js"
 import type { LineAnalysis, TypographyEdit } from "./text-analysis.js"
 export { isNarrationLine, isSeparatorLine, isBoxDrawingLine } from "./text-analysis.js"
 export type { TypographyEdit } from "./text-analysis.js"
@@ -77,10 +78,6 @@ const NO_SPACE_BEFORE = new Set(["！", "？", "!", "?", "…", "―", "、", "�
 const KATAKANA = /[ァ-ヺー]/
 const JAPANESE = /[぀-ヿ㐀-鿿豈-﫿々〆ヶ]/
 const ASCII_ALNUM = /[A-Za-z0-9]/
-const DIGIT_CHAR = /[0-9０-９〇零一二三四五六七八九十百千]/
-function isNumericRangeDash(chars: string[], start: number, end: number): boolean {
-  return end - start === 1 && chars[start] === "–" && start > 0 && end < chars.length && DIGIT_CHAR.test(chars[start - 1]) && DIGIT_CHAR.test(chars[end])
-}
 
 /** 本文の表記を点検する */
 export function checkTypography(
@@ -155,6 +152,7 @@ function checkLine(a: LineAnalysis, lineNo: number, issues: TypographyIssue[], i
     while (j < chars.length && a.spanAt[j] === a.spanAt[i] && !urlMask[j] && predicate(chars[j])) j++
     return j
   }
+  const roleAt = (i: number) => urlMask[i] ? null : punctuationRole(chars, i, a.spanAt[i]?.to ?? i)
 
   // 行の分類は文章点検と共通。字下げだけは、壊れたルビより前の空白も安全に修正できる。
   const n = a.leading
@@ -162,7 +160,9 @@ function checkLine(a: LineAnalysis, lineNo: number, issues: TypographyIssue[], i
   const desired = a.noIndent || indent === "none" || a.kind === "display" ? "" : "　"
   const indentEdit = { start: 0, end: n, replacement: desired }
   const plainLeading = original.slice(0, n).every(c => c === " " || c === "　" || c === "\t")
-  if (halfIndent) {
+  if (a.kind === "display") {
+    // 表示行の空白は半角・タブも含めてレイアウトとして保持する。
+  } else if (halfIndent) {
     add(0, "indent", "error", "段落頭に半角スペースやタブを使わない", plainLeading ? indentEdit : undefined)
   } else if (n > 0 && a.noIndent) {
     add(0, "indent", "error", "会話・三点リーダ・ダッシュで始まる行は字下げしない", plainLeading ? indentEdit : undefined)
@@ -173,9 +173,10 @@ function checkLine(a: LineAnalysis, lineNo: number, issues: TypographyIssue[], i
     else if (n > 1) add(0, "indent", "warning", `段落頭の字下げが${n}字あります（1字にする）`)
   }
 
-  for (const at of a.ambiguousUrls) add(at, "url-boundary", "warning", "URL と後続の日本語の境界が曖昧なため、この範囲は整形しません。URL を <...> で囲むか空白で区切ってください")
+  for (const at of a.ambiguousUrls) add(at, "url-boundary", "warning", "URL 候補と本文の境界が曖昧なため、この範囲は整形しません。URL なら <...> で囲むか空白で区切ってください")
   const stack: Array<{ ch: string; at: number }> = []
   for (let i = 0; i < chars.length; i++) {
+    if (urlMask[i]) continue
     const ch = chars[i]
     if (ch in OPEN_BRACKETS) stack.push({ ch, at: i })
     else if (ch in CLOSE_BRACKETS) {
@@ -199,7 +200,7 @@ function checkLine(a: LineAnalysis, lineNo: number, issues: TypographyIssue[], i
       }
       i = j; continue
     }
-    if (ch === "‥" || ch === "・" || ch === ".") {
+    if (roleAt(i) === "ellipsis") {
       const j = runEnd(i, c => c === ch)
       const run = j - i
       if ((ch === "." && run < 3) || (ch === "・" && run < 2)) { i = j; continue }
@@ -209,8 +210,7 @@ function checkLine(a: LineAnalysis, lineNo: number, issues: TypographyIssue[], i
     }
     if (ch === "—" || ch === "─" || ch === "–") {
       const j = runEnd(i, c => c === ch)
-      const frame = ch === "─" && ((i > 0 && BOX_FRAME_CHAR.test(chars[i - 1])) || (j < chars.length && BOX_FRAME_CHAR.test(chars[j])))
-      if (!frame && !isNumericRangeDash(chars, i, j)) add(i, "dash", "error", `ダッシュは「――」（U+2015）を使う（「${ch}」は使わない）`, edit(i, j, "―".repeat(j - i + (j - i) % 2)))
+      if (roleAt(i) === "dash") add(i, "dash", "error", `ダッシュは「――」（U+2015）を使う（「${ch}」は使わない）`, edit(i, j, "―".repeat(j - i + (j - i) % 2)))
       i = j; continue
     }
     if (ch === "ー" && chars[i + 1] === "ー" && !(i > 0 && KATAKANA.test(chars[i - 1]))) {
@@ -223,11 +223,11 @@ function checkLine(a: LineAnalysis, lineNo: number, issues: TypographyIssue[], i
         if (chars[k] === "!" || chars[k] === "?") add(k, "halfwidth-punctuation", "error", `半角の「${chars[k]}」は使わない`, edit(k, k + 1, chars[k] === "!" ? "！" : "？"))
       }
       const next = chars[j]
-      if (next !== undefined && !CLOSERS.has(next) && !FOLLOWING_PUNCTUATION.has(next) && !"!?！？".includes(next)) {
+      if (next !== undefined && !CLOSERS.has(next) && !FOLLOWING_PUNCTUATION.has(next) && !roleAt(j) && !"!?！？".includes(next)) {
         if (next === " " || next === "　") {
           const k = runEnd(j, c => c === " " || c === "　")
           const after = chars[k]
-          const replacement = after === undefined || CLOSERS.has(after) || NO_SPACE_BEFORE.has(after) ? "" : "　"
+          const replacement = after === undefined || CLOSERS.has(after) || NO_SPACE_BEFORE.has(after) || roleAt(k) ? "" : "　"
           if (chars.slice(j, k).join("") !== replacement) add(j, "exclamation-space", "error", "感嘆符・疑問符のあとは全角スペース1つ。行末・閉じ括弧・約物の前には入れない", edit(j, k, replacement))
         } else {
           add(j, "exclamation-space", "error", "感嘆符・疑問符の直後に全角スペースを1つ入れる", insertAfter(a, j - 1, "　"))
@@ -301,19 +301,27 @@ export interface FixTypographyResult {
   fixes: TypographyFixSummary[]
   /** 変更された行の前後一覧 */
   changes: TypographyFixChange[]
+  /** 未収束なら原文・修正0件を返す。呼び出し側はそのファイルを保存しない。 */
+  unconvergedLines: number[]
 }
 
 /** 診断が持つ修正案だけを適用する。位置の重なる編集は次の解析で再評価する。 */
-export function fixTypography(text: string, opts: { indent?: IndentStyle } = {}): FixTypographyResult {
+export function fixTypography(text: string, opts: { indent?: IndentStyle; maxPasses?: number } = {}): FixTypographyResult {
   const counts = new Map<TypographyRule, number>()
   const changes: TypographyFixChange[] = []
+  const unconvergedLines: number[] = []
+  const maxPasses = Number.isInteger(opts.maxPasses) && opts.maxPasses! >= 0 ? opts.maxPasses! : 16
   // 区切りも残し、無変更の本文では CRLF を含め文字列を完全に保持する。
   const lines = text.split(/(\r?\n)/)
   for (let part = 0; part < lines.length; part += 2) {
     const before = lines[part]
     let current = before
-    for (;;) {
+    const lineCounts = new Map<TypographyRule, number>()
+    const seen = new Set<string>([current])
+    for (let pass = 0; ; pass++) {
+      const chars = [...current]
       const candidates = checkTypography(current, opts).filter((i): i is TypographyIssue & { fix: TypographyEdit } => !!i.fix)
+        .filter(i => chars.slice(i.fix.start, i.fix.end).join("") !== i.fix.replacement)
         .sort((a, b) => a.fix.start - b.fix.start || a.fix.end - b.fix.end)
       const edits: typeof candidates = []
       let end = -1
@@ -323,21 +331,26 @@ export function fixTypography(text: string, opts: { indent?: IndentStyle } = {})
         end = issue.fix.end
       }
       if (edits.length === 0) break
-      const chars = [...current]
+      if (pass >= maxPasses) { unconvergedLines.push(part / 2 + 1); break }
       for (const issue of edits.reverse()) {
         const { start, end, replacement } = issue.fix
         chars.splice(start, end - start, ...replacement)
-        counts.set(issue.rule, (counts.get(issue.rule) ?? 0) + 1)
+        lineCounts.set(issue.rule, (lineCounts.get(issue.rule) ?? 0) + 1)
       }
       const next = chars.join("")
-      if (next === current) break
+      if (seen.has(next)) { unconvergedLines.push(part / 2 + 1); break }
+      seen.add(next)
       current = next
     }
-    if (current !== before) changes.push({ line: part / 2 + 1, before, after: current })
+    if (current !== before) {
+      changes.push({ line: part / 2 + 1, before, after: current })
+      for (const [rule, count] of lineCounts) counts.set(rule, (counts.get(rule) ?? 0) + count)
+    }
     lines[part] = current
   }
+  if (unconvergedLines.length) return { text, fixes: [], totalFixes: 0, changes: [], unconvergedLines }
   const fixes = [...counts].map(([rule, count]) => ({ rule, count })).sort((a, b) => b.count - a.count)
-  return { text: lines.join(""), fixes, totalFixes: fixes.reduce((sum, f) => sum + f.count, 0), changes }
+  return { text: lines.join(""), fixes, totalFixes: fixes.reduce((sum, f) => sum + f.count, 0), changes, unconvergedLines }
 }
 
 export function formatFixSummary(fixes: TypographyFixSummary[]): string {

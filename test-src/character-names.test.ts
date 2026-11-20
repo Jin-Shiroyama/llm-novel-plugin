@@ -4,7 +4,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "nod
 import { join, dirname } from "node:path"
 import { tmpdir } from "node:os"
 import { selectCharacterDocs, extractNameAliases, clipDocParts } from "../src/core/utils.js"
-import { buildCharacterIndex, resolveCharacterName, characterRanks } from "../src/core/character-names.js"
+import { buildCharacterIndex, resolveCharacterName, characterRanks, findCharacterMentions, writtenNameHints } from "../src/core/character-names.js"
+import { parseNameFields, readNameField } from "../src/core/name-fields.js"
 import { normalizeCharacterState, statesBefore } from "../src/core/character-state.js"
 import { novelContextExecute } from "../src/tools/context.js"
 import { novelUpdateExecute } from "../src/tools/track.js"
@@ -12,6 +13,53 @@ import { novelStatusExecute } from "../src/tools/status.js"
 
 const doc = (label: string, aliases: string[] = [], content = "") => ({ label, aliases, content })
 const names = (text: string, docs = [doc("長谷川栞"), doc("ユウト")]) => selectCharacterDocs(docs, text).map(d => d.label)
+
+test("CRLF の行末を含む名前欄も読み取れる", () => {
+  assert.deepEqual(readNameField("- **視点キャラ**：栞\r"), { label: "視点キャラ", value: "栞" })
+})
+
+test("区切りなしの引用を結合せず、正常な別項目は残して診断する", () => {
+  for (const value of ["「ハル」「春樹」", "『ハル』『春樹』", "「ハル」 「春樹」", "**「ハル」「春樹」**（愛称）"]) {
+    const parsed = parseNameFields(`- **呼称**：栞、${value}、悠真`)
+    assert.deepEqual(parsed.aliases, ["栞", "悠真"], value)
+    assert.equal(parsed.issues.length, 1, value)
+    assert.match(parsed.issues[0].message, /引用.*区切り/)
+    const written = parseNameFields(`- **名前**：${value}`)
+    assert.deepEqual(written.nameHints, [])
+    assert.equal(written.issues.length, 1)
+  }
+})
+
+test("引用・装飾に続く末尾注記を外し、引用内部の括弧と区切りは保持する", () => {
+  for (const value of ["「ハル」（愛称）", "『ハル』（愛称）（注記）", "**ハル**（愛称）", "`ハル`（愛称）", "**ハル（愛称）**"]) {
+    const parsed = parseNameFields(`- **呼称**：${value}`)
+    assert.deepEqual(parsed.aliases, ["ハル"], value)
+    assert.deepEqual(parsed.issues, [])
+    assert.deepEqual(writtenNameHints(`- **名前**：${value}`), ["ハル"], value)
+  }
+  assert.deepEqual(extractNameAliases('- **呼称**：**「影（シャドウ）」**（別名）、「A/B」（識別名）、「[ハル]」（表示名）'), ["影（シャドウ）", "A/B", "[ハル]"])
+  assert.deepEqual(writtenNameHints('- **名前**：「黒の 剣士」（通称）'), ["黒の 剣士"])
+})
+
+test("名前欄の途中の読みと補足、呼称の末尾注記・引用を混同しない", () => {
+  assert.deepEqual(writtenNameHints("- **名前**：佐伯（さえき） 悠真（ゆうま）／主人公"), ["佐伯 悠真", "佐伯", "悠真"])
+  assert.deepEqual(writtenNameHints("- **名前**：佐伯（さえき）　悠真（ゆうま）"), ["佐伯　悠真", "佐伯", "悠真"])
+  assert.deepEqual(extractNameAliases('- **呼称・あだ名**：栞（しおり）（読み）、「ハル」／「春樹」、黒の　剣士、「A/B」、「影（シャドウ）」'),
+    ["栞", "ハル", "春樹", "黒の　剣士", "A/B", "影（シャドウ）"])
+  const broken = parseNameFields("- **呼称**：栞、悠真（ゆうま")
+  assert.deepEqual(broken.aliases, ["栞"])
+  assert.equal(broken.issues[0].line, 1)
+  assert.deepEqual(extractNameAliases('- **呼称**：「[ハル]」、栞\uFF0C「A(未閉じ」'), ["[ハル]", "栞", "A(未閉じ"])
+  assert.deepEqual(writtenNameHints("- **名前**：／主人公"), [])
+})
+
+test("出現判定では正式名と他人の呼称の衝突も全員を弱い候補にする", () => {
+  const index = buildCharacterIndex([doc("ハル"), doc("春樹", ["ハル"])])
+  assert.deepEqual(findCharacterMentions(index, "ハルが来た").map(m => [m.name, m.strength]), [["ハル", "weak"], ["春樹", "weak"]])
+  assert.deepEqual(resolveCharacterName(index, "ハル"), { kind: "resolved", name: "ハル" })
+  assert.deepEqual(findCharacterMentions([{ name: "人物", hints: ["", " "] }], "本文"), [])
+  assert.deepEqual(names("ハル", [doc(" ハル ")]), [" ハル "])
+})
 
 test("記入のない姓名を推測せず、一致ゼロでも全員へ戻さない", () => {
   assert.deepEqual(names("栞が来た。"), [])
@@ -161,8 +209,10 @@ test("前話末尾だけに出る人物の設定・口調を載せ、未記入�
     "outline/chapter-002.md": "ユウトが朝食を作る。", "chapters/chapter-001.md": "# 第1章\n\n　栞が玄関に立っていた。",
   })
   const out = await novelContextExecute({ chapterNumber: 2, includePrompts: false }, ctx)
-  assert.match(out, /\*\*長谷川栞\*\* — 一人称: 私/)
-  assert.ok(out.indexOf("**ユウト**") < out.indexOf("**長谷川栞**"))
+  const speech = out.split("## 🗣️ ことばづかい")[1]
+  assert.match(speech, /### ユウト\n一人称: 俺/)
+  assert.match(speech, /### 長谷川栞\n一人称: 私/)
+  assert.ok(speech.indexOf("### ユウト") < speech.indexOf("### 長谷川栞"))
   assert.match(await novelStatusExecute({}, ctx), /呼称が未記入.*ユウト/)
 })
 

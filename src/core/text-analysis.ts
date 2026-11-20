@@ -1,6 +1,8 @@
 /** 表記点検・整形・文章点検が共有する行と記法の解析。位置はコードポイント単位。 */
 import { parseRubyLine } from "./ruby.js"
 import type { RubyIssue, RubySegment } from "./ruby.js"
+import { urlRanges } from "./urls.js"
+import { punctuationRole } from "./punctuation.js"
 
 export type LineKind = "empty" | "heading" | "separator" | "frame" | "dialogue" | "display" | "narration"
 const SEPARATOR = /^[\s　]*[＊*◇◆□■○●※・〜~\-－―]+(?:[\s　]*[＊*◇◆□■○●※・〜~\-－―]+)*[\s　]*$/
@@ -23,12 +25,13 @@ export function classifyLine(chars: string[]): { kind: LineKind; leading: number
   const first = chars[n]
   let kind: LineKind = "narration"
   if (!rest) kind = "empty"
-  else if (rest.startsWith("#")) kind = "heading"
+  else if (line.startsWith("#")) kind = "heading"
   else if (isBoxDrawingLine(line)) kind = "frame"
   else if (isSeparatorLine(line)) kind = "separator"
   else if (first === "「" || first === "『") kind = "dialogue"
+  else if (punctuationRole(chars, n)) kind = "narration"
   else if (BLOCK_OPENERS.has(first) || LINE_MARKERS.has(first) || LABEL_LINE.test(rest)) kind = "display"
-  const noIndent = kind === "dialogue" || /^[…―—─–‥]|^\.{3}/.test(rest)
+  const noIndent = kind === "dialogue" || (kind === "narration" && punctuationRole(chars, n) !== null)
   return { kind, leading: n, noIndent }
 }
 export const isNarrationLine = (chars: string[]) => classifyLine(chars).kind === "narration"
@@ -55,8 +58,6 @@ export interface LineAnalysis {
   noIndent: boolean
 }
 
-const URL = /https?:\/\/[^\s　<>「」『』（）《》、。！？]+|(?<![A-Za-z0-9._-])(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}(?:\/[^\s　<>「」『』（）《》、。！？]*)?/g
-
 export function analyzeManuscriptLine(line: string): LineAnalysis {
   const original = [...line]
   const { segments, issues: rubyIssues } = parseRubyLine(line)
@@ -78,20 +79,9 @@ export function analyzeManuscriptLine(line: string): LineAnalysis {
   }
   const urlMask = chars.map(() => false)
   const ambiguousUrls: number[] = []
-  const visible = chars.join("")
-  for (const m of visible.matchAll(URL)) {
-    const from = [...visible.slice(0, m.index)].length
-    let candidate = m[0]
-    // ASCII の末尾約物は本文として扱う。<...> 内は明示範囲全体を守る。
-    const delimited = chars[from - 1] === "<" && chars[from + [...candidate].length] === ">"
-    if (!delimited) candidate = candidate.replace(/[.!?,;:]+$/, "")
-    const unicode = /[^\x00-\x7f]/.test(candidate)
-    // 日本語パスと後続の日本語本文は文字だけでは区別できない。曖昧な範囲を変更しない。
-    if (unicode && !delimited) {
-      candidate = m[0]
-      ambiguousUrls.push(from)
-    }
-    for (let k = from; k < from + [...candidate].length; k++) urlMask[k] = true
+  for (const range of urlRanges(chars.join(""))) {
+    if (range.ambiguous) ambiguousUrls.push(range.from)
+    for (let k = range.from; k < range.to; k++) urlMask[k] = true
   }
   return { original, chars, columns, spans, spanAt, rubyIssues, urlMask, ambiguousUrls, ...classifyLine(chars) }
 }

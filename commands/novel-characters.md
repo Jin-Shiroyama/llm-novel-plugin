@@ -35,6 +35,8 @@ agent: novel-planner
 
 ### 四、次へ案内する
 
+視点人物も決まっている場合は、任意で `.novel/config.json` の `defaultPovCharacter` に正式名を設定します。主人公という役割だけでは推測せず、未定なら省略します。保存後は `novel_status` で人物名の参照を確認します。
+
 決まったキャラと掛け合いの魅力をまとめ、`/novel-outline`（プロットづくり）へ案内します。
 
 ## 約束

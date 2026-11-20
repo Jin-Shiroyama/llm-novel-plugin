@@ -27,6 +27,7 @@ import type {
   ChapterUnit,
 } from "./constants.js"
 import { stripRuby } from "./ruby.js"
+import { parseNameFields } from "./name-fields.js"
 import {
   CONCEPT_TEMPLATE,
   WORLD_BUILDING_TEMPLATE,
@@ -399,18 +400,8 @@ export function isPlaceholderValue(value: string): boolean {
 }
 
 /** キャラクターシートから呼称・別名を読み取る */
-const ALIAS_LINE = /^\s*(?:[-*・]\s*)?(?:\*\*)?(?:呼称|別名|通称|愛称|あだ名)(?:\*\*)?\s*[：:]\s*(.+)/
 export function extractNameAliases(content: string): string[] {
-  const out: string[] = []
-  for (const line of content.split("\n")) {
-    const m = line.match(ALIAS_LINE)
-    if (!m || isPlaceholderValue(m[1])) continue
-    for (const piece of m[1].split(/[、,\uFF0C\/]+/)) {
-      const t = piece.replace(/[*`「」『』（）()\[\]]/g, "").trim()
-      if (t.length >= 1) out.push(t)
-    }
-  }
-  return [...new Set(out)]
+  return parseNameFields(content).aliases
 }
 
 /** 人物のことばづかい（`## ことばづかい` から読み取る） */
@@ -712,6 +703,8 @@ export interface NovelConfig {
   targetWords?: number
   chapterCount?: number
   narrativePerspective?: string
+  /** 任意の既定視点人物。キャラ設計後に正式名で設定する。 */
+  defaultPovCharacter?: string
   /** 資料読み込みの文字数上限の上書き */
   limits?: NovelLimits
   /** 部の構成（カクヨムの大見出し等）。fromChapter は通し番号 */

@@ -16,9 +16,11 @@
  * 位置はすべてコードポイント単位（typography.ts の字の位置と合わせる）。
  */
 
+import { explicitUrlRanges } from "./urls.js"
+
 export type RubySegment =
   /** columns[k] は text の k 文字目の元の行での位置 */
-  | { kind: "text"; text: string; columns: number[] }
+  | { kind: "text"; text: string; columns: number[]; url?: true }
   /** baseStart は親文字の先頭の位置 */
   | { kind: "ruby"; base: string; reading: string; baseStart: number }
   /** textStart は傍点を付ける文字の先頭の位置 */
@@ -35,6 +37,30 @@ const KANJI = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF々〆ヶ〇\u{20000}-\u{
 
 /** 1行を、地の文・ルビ・傍点に分ける。記法の崩れは issues に返し、その部分は地の文として残す */
 export function parseRubyLine(line: string): { segments: RubySegment[]; issues: RubyIssue[] } {
+  const ranges = explicitUrlRanges(line)
+  if (!ranges.length) return parseRubyPlainLine(line)
+  const chars = [...line], segments: RubySegment[] = [], issues: RubyIssue[] = []
+  let from = 0
+  const append = (to: number) => {
+    const parsed = parseRubyPlainLine(chars.slice(from, to).join(""))
+    for (const seg of parsed.segments) {
+      if (seg.kind === "text") segments.push({ ...seg, columns: seg.columns.map(c => c + from) })
+      else if (seg.kind === "ruby") segments.push({ ...seg, baseStart: seg.baseStart + from })
+      else segments.push({ ...seg, textStart: seg.textStart + from })
+    }
+    issues.push(...parsed.issues.map(issue => ({ ...issue, column: issue.column + from })))
+  }
+  for (const range of ranges) {
+    append(range.from)
+    segments.push({ kind: "text", text: chars.slice(range.from, range.to).join(""),
+      columns: Array.from({ length: range.to - range.from }, (_, i) => range.from + i), url: true })
+    from = range.to
+  }
+  append(chars.length)
+  return { segments, issues }
+}
+
+function parseRubyPlainLine(line: string): { segments: RubySegment[]; issues: RubyIssue[] } {
   const chars = [...line]
   const segments: RubySegment[] = []
   const issues: RubyIssue[] = []
@@ -218,6 +244,7 @@ function convertLine(line: string, notation: RubyNotation): string {
  *   aozora            《》をすべて ※［＃…］ の注記にする（青空文庫は漢字以外にもルビを振るため）
  */
 function formatText(seg: Extract<RubySegment, { kind: "text" }>, original: string[], notation: RubyNotation): string {
+  if (seg.url) return seg.text
   const chars = [...seg.text]
   if (notation === "aozora") {
     return chars

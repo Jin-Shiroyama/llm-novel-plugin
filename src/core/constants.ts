@@ -25,6 +25,9 @@ export type IndentStyle = (typeof INDENT_STYLES)[number]
 export const CHAPTER_UNITS = ["話", "章"] as const
 export type ChapterUnit = (typeof CHAPTER_UNITS)[number]
 
+/** 保存時の自動整形。適用規則とは独立した既定値。 */
+export const DEFAULT_AUTO_FIX = true
+
 /** プロジェクト既定値（Web連載・ライトノベル標準） */
 export const DEFAULTS = {
   /** 目標総文字数（Web連載の当面30話＝9万字／文庫1冊相当は10〜12万字） */

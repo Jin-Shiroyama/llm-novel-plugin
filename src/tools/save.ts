@@ -20,7 +20,7 @@ import type { SectionKind } from "../core/sections.js"
 import { summarizeForSave, summarizeProseForSave } from "./check.js"
 import { readGlossaryCheck } from "../core/glossary.js"
 import { fixTypography, formatFixSummary, formatFixChanges } from "../core/typography.js"
-import { DEFAULTS, CHAPTER_WORD_TOLERANCE } from "../core/constants.js"
+import { DEFAULTS, CHAPTER_WORD_TOLERANCE, DEFAULT_AUTO_FIX } from "../core/constants.js"
 import type { ToolRuntimeContext } from "./types.js"
 
 export interface SaveChapterArgs {
@@ -30,7 +30,7 @@ export interface SaveChapterArgs {
   title: string
   content: string
   updateState?: boolean
-  /** 機械的に直せる表記を保存時に自動整形するかどうか。既定 false */
+  /** 機械的に直せる表記を保存時に自動整形するかどうか。既定 DEFAULT_AUTO_FIX（true） */
   autoFix?: boolean
 }
 
@@ -57,8 +57,9 @@ export async function novelSaveChapterExecute(
   const filePath = join(chaptersDir, fileName)
 
   const rawBody = stripChapterHeading(args.content)
-  const autoFix = args.autoFix === true
+  const autoFix = args.autoFix ?? DEFAULT_AUTO_FIX
   const fixResult = autoFix ? fixTypography(rawBody, { indent }) : null
+  if (fixResult?.unconvergedLines.length) return `❌ ${label}は保存していません。自動整形が収束しませんでした（本文 ${fixResult.unconvergedLines.join("、")}行）。原稿を確認してください。`
   const body = fixResult ? fixResult.text : rawBody
   const title = normalizeChapterTitle(args.title)
 

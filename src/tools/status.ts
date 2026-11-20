@@ -58,6 +58,8 @@ import { parsePublishInfo, describePublishInfo, publishIssues } from "../core/pu
 import { DEFAULTS } from "../core/constants.js"
 import { CONCEPT_TEMPLATE, WORLD_BUILDING_TEMPLATE, CHARACTER_PROFILES_TEMPLATE } from "../core/templates.js"
 import { buildCharacterIndex } from "../core/character-names.js"
+import { parseNameFields } from "../core/name-fields.js"
+import { validatePovReferences } from "../core/pov.js"
 import { normalizeCharacterState } from "../core/character-state.js"
 import type { ToolRuntimeContext } from "./types.js"
 
@@ -269,7 +271,11 @@ export async function novelStatusExecute(
   const issues: string[] = []
   const characterDocs = await listCharacterDocs(dir)
   const index = buildCharacterIndex(characterDocs)
-  const missingAliases = index.filter(c => !characterDocs.some(d => d.label === c.name && d.aliases.length > 0))
+  issues.push(...await validatePovReferences(dir, config, index))
+  for (const doc of characterDocs) for (const issue of parseNameFields(doc.content).issues) {
+    issues.push(`${doc.canon ? "canon/characters" : "characters"}/${doc.label}.md:${issue.line}: ${issue.message}`)
+  }
+  const missingAliases = index.filter(c => !characterDocs.some(d => d.label.trim() === c.name && d.aliases.length > 0))
   if (missingAliases.length > 0) issues.push(`呼称が未記入の人物: ${missingAliases.map(c => c.name).join("、")}。シートの呼称欄に、本文で使う姓・名・あだ名を記入してください`)
   const foreshadowRecord = await readForeshadowRecord(getDocPath(dir, "foreshadow"))
   const { valid: foreshadowItems, invalid: brokenForeshadow } = splitForeshadowEntries(

@@ -17,7 +17,8 @@ function fillTemplate(template: string, vars: Record<string, string>): string {
 const WRITING_STYLE_CORE = `✅ 感情のラベルやできあいの定型句に頼らず、キャラ固有の動作・台詞・語り手の声で書く
 ✅ 話の終わりを道徳的な教訓や感動まとめで締めず、やり取り・余韻・引き・オチで切る
 ✅ キャラごとに口調と語彙を書き分け、設定は場面や会話の中で自然に見せる
-✅ 表記規約と反AI基準は novel-writing skill に従う（保存時は点検のみ。自動整形は autoFix: true を明示した場合だけ）`
+✅ 表記規約と反AI基準は novel-writing skill に従う。自動整形は autoFix が有効な場合に適用する（省略時の動作はツールの引数説明を参照）
+✅ novel_context の視点人物の指定に従う。未解決の視点を代名詞や主人公という役割から推測しない`
 
 // ============================================================
 // 企画書（concept）
@@ -107,6 +108,7 @@ export const CHARACTER_PROFILES_PROMPT = `<system>
 <output>
 .novel/characters/profiles.md（一覧・関係性マップ・掛け合いの組み合わせ）と、
 一人ずつの .novel/characters/{名前}.md（基本情報・魅力とキャラ立ち・ことばづかい・変化の方向）の形で出力してください。
+視点人物が決まった場合だけ、任意で config.json の defaultPovCharacter に正式名を設定します。主人公という役割から推測せず、未定なら省略します（novel-planning skill）。
 </output>`
 
 // ============================================================
@@ -179,6 +181,7 @@ export const OUTLINE_SHORT_PROMPT = `<system>
 
 <output>
 短編用の .novel/outline-brief.md の雛形に沿って Markdown で出力してください。
+視点キャラ・登場人物の専用欄は任意です。正式名で記入し、視点の省略は作品既定の継承、なし は継承停止とします（novel-planning skill）。
 </output>`
 
 // ============================================================
@@ -209,6 +212,7 @@ export const OUTLINE_DETAILED_PROMPT = `<system>
 
 <output>
 .novel/outline-detailed.md（または .novel/outline/chapter-NNN.md）の雛形に沿って出力してください。
+視点キャラ・登場人物の専用欄は任意です。正式名で記入し、視点の省略は作品既定の継承、なし は継承停止とします。「登場キャラと掛け合い」は自由文です（novel-planning skill）。
 </output>`
 
 // ============================================================
@@ -227,6 +231,7 @@ export const SCENES_PROMPT = `<system>
 【各シーンに書くもの】
 - シーンID（1.1、1.2 など）と状態 \`[ ]\`
 - 視点キャラ、この場面の見どころ、やること、想定文字数
+- 視点キャラは正式名を一人だけ指定する。省略は話・作品既定を継承、なし は継承停止。登場人物の専用欄は任意（novel-planning skill）
 - _Prompt（Tone / Focus / Avoid）
 </task>
 

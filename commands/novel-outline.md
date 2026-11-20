@@ -30,6 +30,7 @@ agent: novel-planner
 | `short`（短編・読み切り） | `outline-short` | たった1つの見どころに絞り、導入（2割）→ 展開（6割）→ 見せ場とオチ（2割）。**短編はここで完了し `/write-chapter` へ進める** |
 
 - 部の区切り（カクヨムの章立て等）を使う場合は `.novel/config.json` の `parts` に書きます
+- 視点と登場人物を明示する場合は専用の `視点キャラ`・`登場人物` 欄を使います。省略時の継承と `なし` の扱いは novel-planning skill に従い、「登場キャラと掛け合い」は自由文で残します
 - プロローグ・幕間（掲示板回や別視点回など）・エピローグは使いたいときだけ置きます
 
 ### 三、話別プロット（`.novel/outline-detailed.md` または `.novel/outline/chapter-NNN.md`）を作る（短編以外）

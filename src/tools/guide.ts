@@ -45,7 +45,7 @@ const WORKFLOW_GUIDE = `# 📖 ライトノベル・Web小説の進め方
 
 1. \`novel_context(chapterNumber: N)\` で資料を一式そろえる
 2. プロット・トーン・ことばづかいに沿って本文を書く
-3. \`novel_save_chapter\` で保存する（本文をそのまま保存して点検し、目安文字数と比較する。❌ があれば直す。自動整形は autoFix: true を明示した場合のみ）
+3. \`novel_save_chapter\` で保存し、点検結果と目安文字数を確認する。❌ があれば直す。自動整形は autoFix が有効な場合に適用する（省略時の動作はツールの引数説明を参照）
 4. \`novel_update\` で \`character-state\` / \`summary\` / \`foreshadow\` を更新する
 5. まとまったら \`novel_export(split: true)\` で1話ずつ書き出す
 

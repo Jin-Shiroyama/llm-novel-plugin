@@ -15,7 +15,7 @@ A light-novel & Japanese web-novel writing plugin for LLM harnesses (OpenCode-fi
 
 Character matching uses filenames, explicitly separated names, and aliases written in character sheets. Fill in the aliases field; surname boundaries are no longer guessed. Ambiguous aliases cannot update character state. Existing unambiguous aliases are resolved in memory before replaying state changes.
 
-Saving now checks typography without changing the manuscript by default. Use `novel_save_chapter(autoFix: true)` or `novel_check(fix: true)` to apply safe fixes explicitly. Ruby readings and emphasis boundaries are preserved; ambiguous URL boundaries are reported for manual clarification.
+Saving applies safe typography fixes by default (`novel_save_chapter(autoFix: false)` to skip auto-fix, `novel_check(fix: true)` for existing chapters). Ruby readings and emphasis boundaries are preserved; ambiguous URL boundaries are reported for manual clarification.
 
 ## Development
 

@@ -74,6 +74,7 @@ export async function novelCheckExecute(args: CheckArgs, ctx: ToolRuntimeContext
   const fixedCounts = new Map<TypographyRule, number>()
   const fixedChanges: TypographyFixChange[] = []
   let fixedFiles = 0
+  const unconverged: string[] = []
 
   for (const f of files) {
     const raw = await safeReadFile(f.path)
@@ -84,7 +85,8 @@ export async function novelCheckExecute(args: CheckArgs, ctx: ToolRuntimeContext
     let text = raw
     if (applyFix) {
       const fixed = fixTypography(raw, { indent })
-      if (fixed.totalFixes > 0 && fixed.text !== raw) {
+      if (fixed.unconvergedLines.length) unconverged.push(`${sectionLabel(f.section, unit)}（${fixed.unconvergedLines.join("、")}行）`)
+      if (fixed.unconvergedLines.length === 0 && fixed.totalFixes > 0 && fixed.text !== raw) {
         await backupPreviousDraft(dir, sectionFileName(f.section), raw)
         await safeWriteFile(f.path, fixed.text)
         text = fixed.text
@@ -109,11 +111,12 @@ export async function novelCheckExecute(args: CheckArgs, ctx: ToolRuntimeContext
   const fixedList = [...fixedCounts.entries()]
     .map(([rule, count]) => ({ rule, count }))
     .sort((a, b) => b.count - a.count)
-  const fixNote = !applyFix
+  const failureNote = unconverged.length ? `❌ 自動整形が収束せず、上書きしていない本文: ${unconverged.join("、")}。元の本文を点検しています。\n` : ""
+  const fixNote = failureNote + (!applyFix
     ? ""
     : totalFixed > 0
       ? `✨ 表記を自動修正しました（${totalFixed}件／${fixedFiles}ファイル: ${formatFixSummary(fixedList)}。旧稿は .novel/drafts/ に残しました）\n${formatFixChanges(fixedChanges)}`
-      : `ℹ️ 自動修正できる表記箇所はありませんでした\n`
+      : unconverged.length ? "" : `ℹ️ 自動修正できる表記箇所はありませんでした\n`)
 
   const all = results.flatMap((r) => r.issues)
   const scope = target === null ? describeScope(results.map((r) => r.section), unit) : sectionLabel(target, unit)

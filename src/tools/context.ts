@@ -72,6 +72,7 @@ import { sourceWorkOf, readCanonParts } from "../core/canon.js"
 import type { LimitKey, Seriousness, ChapterUnit } from "../core/constants.js"
 import { buildCharacterIndex, characterRanks, resolveCharacterName } from "../core/character-names.js"
 import type { CharacterIndex } from "../core/character-names.js"
+import { resolvePovContext, withoutPovFields } from "../core/pov.js"
 import type { ToolRuntimeContext } from "./types.js"
 
 export interface ContextArgs {
@@ -202,7 +203,7 @@ export async function novelContextExecute(
     context += clipParts(withHeading(concept), "concept") + "\n\n"
   }
 
-  const chapterText = [chapterOutline ?? "", shortBrief ?? "", ...sceneParts.map((p) => p.content)].join("\n")
+  const chapterText = [chapterOutline ?? "", shortBrief ?? "", ...sceneParts.map((p) => p.content)].map(withoutPovFields).join("\n")
 
   // 人物選択に使う資料を先にそろえる。前話末尾も同じ索引で照合する。
   const prev = previousManuscriptFile(manuscriptFiles, section)
@@ -210,6 +211,18 @@ export async function novelContextExecute(
   const tail = prevText ? takeTailChars(prevText, resolveLimit(config, "previousChapterTail")) : ""
   const allCharacterDocs = await listCharacterDocs(dir)
   const index = buildCharacterIndex(allCharacterDocs)
+  const pov = resolvePovContext(index, {
+    defaultPov: config?.defaultPovCharacter, outline: chapterOutline ?? shortBrief ?? "", label,
+    scenes: section.kind === "chapter" ? parseScenes(sceneSource ?? "").filter(s => s.id === String(section.chapter) || s.id.startsWith(`${section.chapter}.`)) : [],
+    sceneId: args.sceneId,
+  })
+  if (pov.views.some(v => v.pov.kind !== "unspecified")) {
+    context += `## 👁️ 視点人物\n`
+    for (const view of pov.views) context += `- ${view.scope}: ${view.pov.kind === "resolved" ? view.pov.name : view.pov.kind === "none" ? "なし（継承停止）" : view.pov.kind === "invalid" ? "未解決" : "未指定"}\n`
+    context += "\n"
+  }
+  for (const warning of pov.warnings) context += `⚠️ 人物の指定: ${warning}\n`
+  if (pov.warnings.length) context += "\n"
   const charState = await readCharacterStateRecord(getDocPath(dir, "character-state"))
   const normalized = charState.kind === "ok" ? normalizeCharacterState(charState.value, index) : null
   const states = normalized ? statesBefore(normalized.file, section) : []
@@ -217,7 +230,10 @@ export async function novelContextExecute(
   const stateIndex = [...index, ...states.filter(c => resolveCharacterName(index, c.name).kind === "unknown")
     .map(c => ({ name: c.name, hints: [c.name] }))]
   const ranks = characterRanks(stateIndex, chapterText, tail)
-  const relevantDocs = allCharacterDocs.filter(d => ranks.has(d.label))
+  for (const name of pov.cast) ranks.set(name, -1)
+  for (const name of pov.names) ranks.set(name, -2)
+  const relevantDocs = allCharacterDocs.filter(d => ranks.has(d.label.trim()))
+    .map(d => ({ ...d, label: d.label.trim() }))
     .sort((a, b) => ranks.get(a.label)! - ranks.get(b.label)!)
   const profileParts = (await readDocParts(dir, "characters/profiles.md", null)).map(p => ({
     ...p, label: "一覧・関係性（profiles.md）", rank: 4,
@@ -229,7 +245,7 @@ export async function novelContextExecute(
   if (allCharacterDocs.length > 0 || characterParts.length > 0) {
     context += `## 👤 登場人物 (P1 — キャラ立ちと掛け合い)\n`
     if (relevantDocs.length > 0) {
-      context += `（この${unit}に関わる人物の設定を載せています: ${[...new Set(relevantDocs.map(d => d.label))].join("、")}。当話のプロット・シーン、前の節の末尾の順）\n`
+      context += `（この${unit}に関わる人物の設定を載せています: ${[...new Set(relevantDocs.map(d => d.label))].join("、")}。視点・登場人物の指定、当話のプロット・シーン、前の節の末尾の順）\n`
     } else if (index.length > 0) {
       const [names] = truncateChars(index.map(c => c.name).join("、"), resolveLimit(config, "characterProfiles"))
       context += `⚠️ 人物を特定できませんでした。プロットの登場人物名とシートの呼称を確認してください。\n人物一覧: ${names}\n`
@@ -237,16 +253,14 @@ export async function novelContextExecute(
     context += clipParts(characterParts, "characterProfiles") + "\n\n"
   }
   for (const warning of normalized?.warnings ?? []) context += `⚠️ 人物名の記録: ${warning}\n`
+  if (normalized?.warnings.length) context += "\n"
 
   // --- ことばづかい（P1） ---
   const speech = buildSpeechContext(index, relevantDocs, states, ranks, unit)
-  if (speech) {
-    const limit = resolveLimit(config, "speech")
-    const [body, truncated] = truncateChars(speech, limit)
+  if (speech.length) {
     context += `## 🗣️ ことばづかい (P1 — 口調と距離感を保つ)\n`
     context += `台詞と、一人称の語りなら地の文も、このとおりに書きます。呼び方や敬語が変わるときは理由になる出来事を本文に置き、novel_update(character-state) の speech を更新します。\n`
-    context += body
-    if (truncated) context += `\n…（以下省略。limits.speech で枠を広げられます）`
+    context += clipParts(speech, "speech")
     context += "\n\n"
   }
 
@@ -377,7 +391,7 @@ export async function novelContextExecute(
     if (hasStyleSample) {
       context += `- 文体見本: 企画書の「文体見本」の語尾・リズム・一文の長さ・距離感を最優先でそろえる\n`
     }
-    context += `- 段落の字下げ: ${indent === "none" ? "字下げなし（Web小説スタイル）" : "地の文は全角1字下げ（会話・記号・画面行は字下げしない）"}\n`
+    context += `- 段落の字下げ: ${indent === "none" ? "本文は字下げなし（Web小説スタイル）" : "地の文は全角1字下げ。会話・三点リーダ・ダッシュ始まりは字下げしない"}。表示行のレイアウトは保持する\n`
     context += `- 参照するスキル: ${skillsList.join("、")}\n`
     context += `- 上のプロット（P0）と企画書の「トーンとNGライン」を守り、人物の魅力と「ことばづかい」を保つ\n`
     if (sourceWork) {
@@ -464,8 +478,7 @@ function buildSpeechContext(
   states: ResolvedCharacter[],
   ranks: Map<string, number>,
   unit: ChapterUnit,
-): string {
-
+): DocPart[] {
   const entries: Array<{ name: string; profile: SpeechProfile; state?: ResolvedCharacter }> = []
   for (const doc of relevantDocs) {
     if (doc.canon && relevantDocs.some((d) => !d.canon && d.label === doc.label)) continue
@@ -481,7 +494,7 @@ function buildSpeechContext(
   }
 
   entries.sort((a, b) => (ranks.get(a.name) ?? 4) - (ranks.get(b.name) ?? 4))
-  const blocks: string[] = []
+  const blocks: DocPart[] = []
   for (const { name, profile, state } of entries) {
     const changed = (field: string) => {
       const at = state?.changedAt[field]
@@ -507,13 +520,18 @@ function buildSpeechContext(
     }
 
     if (fields.length === 0 && rows.length === 0) continue
-    let block = `**${name}**${fields.length > 0 ? ` — ${fields.join(" ／ ")}` : ""}`
+    let block = fields.join(" ／ ")
     for (const r of rows) {
-      block += `\n  - ${r.target} → ${r.term}${r.politeness ? `（${r.politeness}）` : ""}${r.mark}`
+      block += `${block ? "\n" : ""}  - ${r.target} → ${r.term}${r.politeness ? `（${r.politeness}）` : ""}${r.mark}`
     }
-    blocks.push(block)
+    blocks.push({ label: name, content: block, rank: ranks.get(name) ?? 4 })
   }
-  return blocks.join("\n")
+  // 複数人は clipDocParts の見出しに名前が出る。一人のときだけ本文にも付ける。
+  if (blocks.length === 1) {
+    const block = blocks[0]
+    block.content = `**${block.label}**${block.content.startsWith("  - ") ? "\n" : " — "}${block.content}`
+  }
+  return blocks
 }
 
 /** 話別（章別）プロットから該当する話・節の記述を抜き出す。「## 第1話」「## 第1章」の両対応 */
