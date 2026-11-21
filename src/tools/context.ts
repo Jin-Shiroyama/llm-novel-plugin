@@ -431,14 +431,14 @@ export async function novelContextExecute(
     }
   }
 
-  // --- 次の話のプロット抜粋（P2 — 引きのつなぎ・先食い防止。chapterText には含めない） ---
-  if (!singleBody && section.kind === "chapter") {
-    const nextRaw = await readOutlineForSection({ kind: "chapter", chapter: section.chapter + 1 })
-    const preview = nextRaw ? extractNextOutlinePreview(nextRaw) : null
-    if (preview) {
-      context += `## ⏭️ 次の${unit}のプロット抜粋 (P2 — 引きのつなぎ・先食い防止)\n`
-      context += `（この${unit}では書かず、話末の引きを自然につなぐため・次の展開を先食いしないためだけに参照します）\n`
-      context += `${preview}\n\n`
+  // --- 次の話（または直後の幕間）のプロット抜粋（P2 — 引きのつなぎ・先食い防止。chapterText には含めない） ---
+  if (!singleBody && section.kind !== "epilogue") {
+    const next = await resolveNextOutline(section, readOutlineForSection)
+    if (next) {
+      const nextKindLabel = next.section.kind === "chapter" ? `次の${unit}` : "次の幕間"
+      context += `## ⏭️ ${nextKindLabel}のプロット抜粋 (P2 — 引きのつなぎ・先食い防止)\n`
+      context += `（この${section.kind === "chapter" ? unit : "節"}では書かず、話末の引きを自然につなぐため・次の展開を先食いしないためだけに参照します）\n`
+      context += `${next.preview}\n\n`
     }
   }
 
@@ -688,7 +688,41 @@ function foreshadowNote(r: ForeshadowReminder, currentLabel: string, unit: Chapt
 const NEXT_OUTLINE_MAX_CHARS = 400
 const PLACEHOLDER_ONLY = /^\[[^\]\n]+\]$/
 
-/** 次の話のプロットから「見出し・見どころ・入り」だけを短く抜粋する（該当欄が無ければ先食い防止のため null） */
+function nextOutlineCandidates(section: ManuscriptSection): ManuscriptSection[] {
+  switch (section.kind) {
+    case "prologue":
+      return [{ kind: "chapter", chapter: 1 }]
+    case "chapter":
+      return [
+        { kind: "interlude", chapter: section.chapter, index: 1 },
+        { kind: "chapter", chapter: section.chapter + 1 },
+      ]
+    case "interlude":
+      return [
+        { kind: "interlude", chapter: section.chapter, index: section.index + 1 },
+        { kind: "chapter", chapter: section.chapter + 1 },
+      ]
+    case "epilogue":
+      return []
+  }
+}
+
+async function resolveNextOutline(
+  section: ManuscriptSection,
+  readOutline: (target: ManuscriptSection) => Promise<string | null>,
+): Promise<{ section: ManuscriptSection; preview: string } | null> {
+  for (const candidate of nextOutlineCandidates(section)) {
+    const raw = await readOutline(candidate)
+    if (!raw || !raw.trim()) continue
+    // 直後の節のプロットが存在する場合はそこで対象を確定する。
+    // 掲示板回などで見どころ・入り欄が無く抜粋できない場合も、その節を飛ばして次の話を先読みさせない。
+    const preview = extractNextOutlinePreview(raw)
+    return preview ? { section: candidate, preview } : null
+  }
+  return null
+}
+
+/** 次の話（または幕間）のプロットから「見出し（## 以上）・見どころ・入り」だけを短く抜粋する（該当欄が無ければ先食い防止のため null） */
 export function extractNextOutlinePreview(outline: string): string | null {
   const lines = outline.replace(/\r\n/g, "\n").split("\n")
   let heading = ""
@@ -698,7 +732,7 @@ export function extractNextOutlinePreview(outline: string): string | null {
   for (const rawLine of lines) {
     const line = rawLine.trim()
     if (!heading) {
-      const hm = line.match(/^#{1,3}\s+(.+)$/)
+      const hm = line.match(/^#{1,2}\s+(.+)$/)
       if (hm) {
         heading = hm[1].trim()
         continue

@@ -485,4 +485,62 @@ describe("E2E ワークフロー: ジャンル別（ラブコメ／ファンタ�
     assert.ok(saveLong.includes("多め"))
     assert.ok(saveLong.includes("見どころやごほうびは削らず"))
   })
+
+  test("次話抜粋（P2）はプロローグ→第1話・話→直後の幕間を対象とし、抜粋不可の幕間があっても飛ばして次話を読まない", async () => {
+    const dir = makeDir()
+    const ctx = { projectDir: dir }
+    await novelInitExecute(
+      { title: "幕間つなぎテスト", genre: "異世界ファンタジー", storyMode: "arc", targetWords: 6000, chapterCount: 2 },
+      ctx,
+    )
+    writeDoc(
+      dir,
+      "outline-detailed.md",
+      `## プロローグ
+- **この節の見どころ**：旅立ちの前夜
+
+## 第1話：最初の依頼
+- **この話の見どころ**：ギルドで初めての仕事を受ける
+### 展開（3ビート）
+1. **入り**：朝のギルドに駆け込む
+
+## 幕間（第1話のあと）
+- **この節の見どころ**：受付嬢から見た新人の印象
+### 展開（3ビート）
+1. **入り**：カウンターで書類を整理する
+
+## 第2話：森の奥へ
+- **この話の見どころ**：初めての森探索
+### 展開（3ビート）
+1. **入り**：東門から街道へ出る
+`,
+    )
+
+    // プロローグでは第1話が抜粋される
+    const pro = await novelContextExecute({ section: "prologue" }, ctx)
+    assert.ok(pro.includes("## ⏭️ 次の話のプロット抜粋 (P2 — 引きのつなぎ・先食い防止)"))
+    assert.ok(pro.includes("### 第1話：最初の依頼"))
+    assert.ok(pro.includes("朝のギルドに駆け込む"))
+
+    // 第1話の直後に幕間プロットがあれば、第2話ではなく幕間が見出し「次の幕間」で抜粋される
+    const ch1 = await novelContextExecute({ chapterNumber: 1 }, ctx)
+    assert.ok(ch1.includes("## ⏭️ 次の幕間のプロット抜粋 (P2 — 引きのつなぎ・先食い防止)"))
+    assert.ok(ch1.includes("受付嬢から見た新人の印象"))
+    assert.ok(!ch1.includes("初めての森探索"))
+
+    // 幕間の次は第2話が抜粋される
+    const inter = await novelContextExecute({ section: "interlude", chapterNumber: 1 }, ctx)
+    assert.ok(inter.includes("## ⏭️ 次の話のプロット抜粋 (P2 — 引きのつなぎ・先食い防止)"))
+    assert.ok(inter.includes("### 第2話：森の奥へ"))
+
+    // 掲示板回のように見どころ・入り欄が無い幕間が存在する場合は、飛ばして第2話を抜粋せず何も出さない
+    writeDoc(
+      dir,
+      "outline/interlude-001-1.md",
+      "## 幕間（第1話のあと）\n掲示板で新人の噂が盛り上がる回。\n",
+    )
+    const ch1WithBoardInterlude = await novelContextExecute({ chapterNumber: 1 }, ctx)
+    assert.ok(!ch1WithBoardInterlude.includes("## ⏭️ 次の"))
+    assert.ok(!ch1WithBoardInterlude.includes("初めての森探索"))
+  })
 })

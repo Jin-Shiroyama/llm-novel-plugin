@@ -59,7 +59,7 @@ pnpm build
 | `/novel-outline` | プロット概要と話別プロットを作る |
 | `/novel-scenes` | （任意）長めの話や山場だけシーンに割る |
 | `/write-chapter <話番号>` | 1話を書き上げ、保存・点検・記録更新まで完了する |
-| `/write-chapters <範囲\|next N>` | 複数話を1話ずつ別セッションで続けて書く |
+| `/write-chapters <範囲\|next N> [--review-every=N] [--revise]` | 複数話を1話ずつ別セッションで続けて書く（`--revise` で編集者講評＋必要時最大1回リライト） |
 | `/novel-review <話番号\|all>` | エンタメ編集者の5軸（キャラ・快感・テンポ・トーン・つじつま＆表記）でレビューする |
 | `/novel-publish` | 題・キャッチコピー・紹介文・タグ作成と1話ずつの書き出し |
 | `/novel-status` | 進行状況と記録の抜けを確認する |

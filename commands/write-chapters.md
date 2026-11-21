@@ -60,7 +60,7 @@ agent: novel-planner
 ```
 第{N}話の下書きを novel-editing skill の5軸（特に見どころ・溜めとごほうび、キャラ立ち、トーン＆NGライン、つじつま）で短く講評してください（本文ファイルは書き換えない）。
 対象話の novel_context・novel_check と .novel/chapters/chapter-{NNN}.md を読み、書き手の勢いや文体見本を無難に丸める細かい言い回し変更は求めず、以下で判定します：
-- 「そのまま採用」：🔴 が無く、見どころ・溜めの大きな欠けも無い → このまま確定稿として novel_update（character-state・summary・foreshadow、全体の流れの ⚠️ が出ていれば更新）とシーン一覧の [x] 更新まで済ませて報告を返す
+- 「そのまま採用」：🔴 が無く、見どころ・溜めの大きな欠けも無い → このまま確定稿として、まず `novel_update(action: "prompt", content: "character-state-update", chapterNumber: {N})` と `novel_update(action: "prompt", content: "summary-update", chapterNumber: {N})` を取得して記録の決まりを確認したうえで、novel_update（character-state・summary・foreshadow、全体の流れの ⚠️ が出ていれば更新）とシーン一覧の [x] 更新まで済ませて報告を返す
 - 「リライト推奨」：🔴 がある、または見どころ・溜めを大きく伸ばせる 🟡 がある → 記録更新はせず、直す点（🔴 はすべて、🟡 は最重要の最大 2 点まで。「何が起きているか／どう直すか」を箇条書き）だけを短く返す
 
 報告形式（本文は含めない）：
@@ -71,7 +71,7 @@ agent: novel-planner
 ```
 3. **リライトと確定記録（`リライト推奨` のときのみ・最大 1 回）**：
    - `subagent_type`: `novel-writer` / `description`: `第{N}話を講評に沿って書き直す`
-   - `novel-editor` の「よい点」「直す点」だけを渡し、よい点と文体の勢いを保ったまま指摘を反映して `novel_save_chapter` で保存・機械点検（❌解消）し、確定稿の内容で `novel_update`（`character-state`・`summary`・`foreshadow`）とシーン `[x]` を更新して通常モードと同じ報告形式で返させる。
+   - `novel-editor` の「よい点」「直す点」を渡し、**まず保存済みの `.novel/chapters/chapter-{NNN}.md` と `novel_context(chapterNumber: {N})` を読んでから**、よい点と文体の勢いを保ったまま指摘箇所を中心に手直しする（ゼロから全面的に書き直さない）よう指示する。手直し後に `novel_save_chapter` で保存・機械点検（❌解消）し、確定稿の内容で `novel_update`（`character-state`・`summary`・`foreshadow`）とシーン `[x]` を更新して通常モードと同じ報告形式で返させる。
 
 ### 任意の簡易レビュー（`--review-every=N` 指定かつ `--revise` なし時のみ）
 
@@ -94,7 +94,7 @@ agent: novel-planner
 以下のいずれかに当たったら**そこで止め**、残りを書かずに報告します：
 - 「書けなかった」が返った
 - `.novel/chapters/chapter-{NNN}.md` が保存されていない
-- 人物の状態またはあらすじの記録が済んでいない
+- 人物の状態またはあらすじの記録が済んでいない（`--revise` の推敲モードでは、下書き段階ではなく確定稿の後に判定する）
 - 表記の ❌ が残っている
 - 気づいた点に「プロットと大きく変えた」とある
 - `--review-every` の簡易レビューで「要確認（🔴あり）」が返った

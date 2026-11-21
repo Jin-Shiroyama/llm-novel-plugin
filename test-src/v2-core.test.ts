@@ -692,6 +692,14 @@ describe("プロンプト一覧（prompts）と次話プロット抜粋", () => 
     assert.ok(!preview.includes("下の名前で呼ぶ"))
     assert.ok(!preview.includes("秘密の連絡先"))
 
+    // 見出し（## 以上）が無い分割ファイルで ### 展開（3ビート） を題として拾わない
+    const headless = `- **この話の見どころ**：部室での作戦会議\n\n### 展開（3ビート）\n1. **入り**：黒板の前に全員が集まる\n`
+    const headlessPreview = extractNextOutlinePreview(headless)
+    assert.ok(headlessPreview)
+    assert.ok(!headlessPreview.includes("### 展開"))
+    assert.ok(headlessPreview.includes("- 見どころ: 部室での作戦会議"))
+    assert.ok(headlessPreview.includes("- 入り: 黒板の前に全員が集まる"))
+
     // 見どころ・入り欄が無い自由書式メモや未記入プレースホルダのみなら、先食い防止のため null
     const freeform = "## 第3話：テスト勉強\n- **視点キャラ**：悠真\n図書館の自習室でテスト対策を始める。\n"
     assert.equal(extractNextOutlinePreview(freeform), null)

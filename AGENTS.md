@@ -74,10 +74,14 @@ llm-novel-plugin/
 │   ├── genre-sf/                         # SF・近未来・アイデア小説特化
 │   └── novel-fanfic/                     # 二次創作（原作資料・照合・権利と規約）
 ├── docs/
+│   ├── evaluation.md                     # 執筆品質の評価手順（「書かせて読む」ベンチマーク）
 │   └── specs/                            # 詳細仕様
 │       ├── character-name-matching.md    # 人物名照合・解決仕様
 │       ├── pov-context.md                # 視点人物継承・資料優先枠仕様
 │       └── typography-autofix.md         # 表記点検・自動整形仕様
+├── examples/                             # 評価用・参考用の見本作品（執筆直前の writing 状態）
+│   ├── romcom-light/                     # ラブコメ・軽快（episodic / light / minimal / indent: none）
+│   └── fantasy-balanced/                 # 異世界ファンタジー・標準（arc / balanced / standard / indent: fullwidth）
 ├── scripts/
 │   └── check-japanese.mjs                # 簡体字・中国語残存チェック
 └── test-src/                             # テスト（node:test）
