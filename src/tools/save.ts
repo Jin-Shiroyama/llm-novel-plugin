@@ -204,9 +204,9 @@ function formatWordCountLine(
   const range = `${min.toLocaleString("ja-JP")}〜${max.toLocaleString("ja-JP")}文字`
   const status =
     wordCount < min
-      ? `⚠️ 目安より${(min - wordCount).toLocaleString("ja-JP")}文字少なめ`
+      ? `⚠️ 目安より${(min - wordCount).toLocaleString("ja-JP")}文字少なめ（水増しせず、直すなら展開ビートや掛け合いの厚みで調整）`
       : wordCount > max
-        ? `⚠️ 目安より${(wordCount - max).toLocaleString("ja-JP")}文字多め`
+        ? `⚠️ 目安より${(wordCount - max).toLocaleString("ja-JP")}文字多め（見どころやごほうびは削らず、説明の重複や場面配分で調整）`
         : "目安の範囲内"
   return `📊 文字数: ${formatted}文字（目安 ${perChapter.toLocaleString("ja-JP")}文字 ±${tolerancePct}%［${range}］: ${status}）\n`
 }

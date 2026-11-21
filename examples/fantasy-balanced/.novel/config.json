@@ -1,0 +1,31 @@
+{
+  "title": "地図屋の俺、ハズレ魔法〈歩数計〉で迷宮の隠し通路を全部見つけてしまう",
+  "genre": "異世界ファンタジー",
+  "storyMode": "arc",
+  "tone": "ワクワク・爽快、掛け合い",
+  "seriousness": "balanced",
+  "worldBuilding": "standard",
+  "indent": "fullwidth",
+  "targetWords": 36000,
+  "chapterCount": 12,
+  "narrativePerspective": "一人称",
+  "defaultPovCharacter": "レオ",
+  "chapterUnit": "話",
+  "serial": true,
+  "limits": {
+    "previousChapterTail": 1200,
+    "characterProfiles": 6000,
+    "summary": 4000,
+    "scenes": 4000,
+    "speech": 1500,
+    "characterState": 3000,
+    "outlineBrief": 4000,
+    "concept": 4000,
+    "worldBuilding": 6000,
+    "glossary": 3000,
+    "canon": 6000
+  },
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z",
+  "currentPhase": "writing"
+}

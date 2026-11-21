@@ -57,7 +57,7 @@ import { pathToFileURL } from "node:url"
 
 /** 調べる対象（ディレクトリは再帰的にたどる） */
 export const DEFAULT_TARGETS = [
-  "src", "test-src", "commands", "skills", "scripts",
+  "src", "test-src", "commands", "skills", "scripts", "docs", "examples",
   "README.md", "README.ja.md", "AGENTS.md", "package.json",
 ]
 
@@ -94,6 +94,11 @@ export const ALLOW = [
     file: "README.ja.md",
     contains: "単独の漢字は使いません",
     reason: "この検査そのものの説明。語の一覧の例として中国語の語を引用している",
+  },
+  {
+    file: "docs/specs/character-name-matching.md",
+    contains: "括弧・引用の外側の",
+    reason: "呼称欄の区切り文字仕様として全角カンマを例示している",
   },
 ]
 

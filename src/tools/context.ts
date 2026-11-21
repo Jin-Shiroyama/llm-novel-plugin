@@ -160,11 +160,20 @@ export async function novelContextExecute(
   }
 
   // --- この話のプロット（P0） ---
-  let chapterOutline = await readSectionDoc(dir, "outline", section)
-  if (!chapterOutline) {
-    const outline = await safeReadFile(getDocPath(dir, "outline-detailed"))
-    if (outline) chapterOutline = extractOutlineSection(outline, section)
+  let detailedOutline: string | null | undefined = undefined
+  const readDetailedOutline = async (): Promise<string | null> => {
+    if (detailedOutline === undefined) {
+      detailedOutline = await safeReadFile(getDocPath(dir, "outline-detailed"))
+    }
+    return detailedOutline
   }
+  const readOutlineForSection = async (target: ManuscriptSection): Promise<string | null> => {
+    const separated = await readSectionDoc(dir, "outline", target)
+    if (separated) return separated
+    const combined = await readDetailedOutline()
+    return combined ? extractOutlineSection(combined, target) : null
+  }
+  const chapterOutline = await readOutlineForSection(section)
   if (chapterOutline) {
     context += `## 📋 この${section.kind === "chapter" ? unit : "節"}のプロット (P0 — 必ず従う)\n${chapterOutline.trim()}\n\n`
   }
@@ -422,6 +431,17 @@ export async function novelContextExecute(
     }
   }
 
+  // --- 次の話のプロット抜粋（P2 — 引きのつなぎ・先食い防止。chapterText には含めない） ---
+  if (!singleBody && section.kind === "chapter") {
+    const nextRaw = await readOutlineForSection({ kind: "chapter", chapter: section.chapter + 1 })
+    const preview = nextRaw ? extractNextOutlinePreview(nextRaw) : null
+    if (preview) {
+      context += `## ⏭️ 次の${unit}のプロット抜粋 (P2 — 引きのつなぎ・先食い防止)\n`
+      context += `（この${unit}では書かず、話末の引きを自然につなぐため・次の展開を先食いしないためだけに参照します）\n`
+      context += `${preview}\n\n`
+    }
+  }
+
   // --- 書くときの条件 ---
   if (includePrompts && config) {
     const targetWords = config.targetWords && config.targetWords > 0 ? config.targetWords : DEFAULTS.targetWords
@@ -663,6 +683,52 @@ function foreshadowNote(r: ForeshadowReminder, currentLabel: string, unit: Chapt
     case "undated":
       return `${planted}／回収のタイミングは未定`
   }
+}
+
+const NEXT_OUTLINE_MAX_CHARS = 400
+const PLACEHOLDER_ONLY = /^\[[^\]\n]+\]$/
+
+/** 次の話のプロットから「見出し・見どころ・入り」だけを短く抜粋する（該当欄が無ければ先食い防止のため null） */
+export function extractNextOutlinePreview(outline: string): string | null {
+  const lines = outline.replace(/\r\n/g, "\n").split("\n")
+  let heading = ""
+  let highlight = ""
+  let opening = ""
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+    if (!heading) {
+      const hm = line.match(/^#{1,3}\s+(.+)$/)
+      if (hm) {
+        heading = hm[1].trim()
+        continue
+      }
+    }
+    if (!highlight) {
+      const m = line.match(/^(?:[-*・]\s*)?(?:\*\*)?(?:この[話章節]の)?見どころ(?:\*\*)?\s*[：:]\s*(.+)$/)
+      const val = m?.[1].trim() ?? ""
+      if (val && !PLACEHOLDER_ONLY.test(val)) {
+        highlight = val
+        continue
+      }
+    }
+    if (!opening) {
+      const m = line.match(/^(?:(?:\d+\.|[-*・])\s*)?(?:\*\*)?入り(?:\*\*)?\s*[：:]\s*(.+)$/)
+      const val = m?.[1].trim() ?? ""
+      if (val && !PLACEHOLDER_ONLY.test(val)) {
+        opening = val
+        continue
+      }
+    }
+  }
+
+  if (!highlight && !opening) return null
+  const out: string[] = []
+  if (heading) out.push(`### ${heading}`)
+  if (highlight) out.push(`- 見どころ: ${highlight}`)
+  if (opening) out.push(`- 入り: ${opening}`)
+  const [clipped, truncated] = truncateChars(out.join("\n"), NEXT_OUTLINE_MAX_CHARS)
+  return truncated ? `${clipped}…` : clipped
 }
 
 function withHeading(parts: DocPart[]): DocPart[] {

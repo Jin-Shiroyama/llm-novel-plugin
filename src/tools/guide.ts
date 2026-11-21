@@ -67,11 +67,11 @@ const PROMPTS_GUIDE = `# 📝 プロンプト一覧（novel_update(action: "prom
 | \`outline-short\` | 短編・読み切りのプロット概要 |
 | \`outline-detailed\` | 1話ごとのプロット（見どころ・展開ビート・進むもの・引き） |
 | \`scenes\` | 任意のシーン分割 |
-| \`chapter-write\` | 第1話の本文執筆 |
-| \`chapter-continue\` | 第2話以降の本文執筆 |
 | \`consistency-check\` | つじつま・トーン確認 |
 | \`character-state-update\` | キャラの状態・関係・ことばづかいの更新 JSON |
 | \`summary-update\` | 1話ごとのあらすじ・全体の流れの更新 |
+
+※ 本文執筆の資料・条件は \`novel_context\` を使います（プロンプト取得は不要です）。
 
 詳しい執筆技法・ジャンル別のコツはスキルを参照します:
 - 共通: \`novel-planning\` / \`novel-writing\` / \`novel-editing\`

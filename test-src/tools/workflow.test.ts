@@ -189,6 +189,7 @@ describe("E2E ワークフロー: ジャンル別（ラブコメ／ファンタ�
     assert.ok(saveOut.includes("規約から外れた箇所はありません"))
     assert.ok(saveOut.includes("目安 100文字 ±15%"))
     assert.ok(saveOut.includes("少なめ"))
+    assert.ok(saveOut.includes("水増しせず"))
     const savedFile = readFileSync(join(dir, ".novel/chapters/chapter-001.md"), "utf-8")
     assert.ok(savedFile.includes("「行こう」\n　廊下を歩いた！　3メートル先だ。"))
     // 同じ内容を繰り返し保存しても before-fix の控えが重複生成されない
@@ -434,5 +435,54 @@ describe("E2E ワークフロー: ジャンル別（ラブコメ／ファンタ�
     assert.ok(msg.includes("2行目: □...□怪しい2行目だ!"))
     assert.ok(msg.includes("autoFix: false"))
     assert.ok(msg.includes("novel_check(chapterNumber: 2)"))
+  })
+
+  test("次話プロット抜粋（P2）は引きのつなぎ向けに見どころ・入りのみ載せ、P1人物抽出を汚染せず、最終話や単話短編では出さない", async () => {
+    const dir = makeDir()
+    const ctx = { projectDir: dir }
+    await novelInitExecute(
+      { title: "次話先読みテスト", genre: "ラブコメ", storyMode: "episodic", targetWords: 100, chapterCount: 2 },
+      ctx,
+    )
+    writeDoc(dir, "characters/アオイ.md", "# アオイ\n## 基本情報\n- **名前**：アオイ\n- **呼称**：アオイ\n")
+    writeDoc(dir, "characters/カエデ.md", "# カエデ\n## 基本情報\n- **名前**：カエデ\n- **呼称**：カエデ\n")
+    writeDoc(
+      dir,
+      "outline-detailed.md",
+      `## 第1話：放課後の出会い
+- **この話の見どころ**：アオイが教室で忘れ物を拾う
+- **登場キャラと掛け合い**：アオイ
+
+### 展開（3ビート）
+1. **入り**：チャイムが鳴る
+
+## 第2話：屋上の転校生
+- **この話の見どころ**：カエデが屋上で弁当を広げるギャップ
+- **話末の引き／オチ**：カエデの秘密が明かされる
+
+### 展開（3ビート）
+1. **入り**：翌日、屋上の扉を開けるとカエデが立っていた
+3. **この話の山**：カエデが過去を語る
+`,
+    )
+
+    const ch1 = await novelContextExecute({ chapterNumber: 1 }, ctx)
+    assert.ok(ch1.includes("## ⏭️ 次の話のプロット抜粋 (P2 — 引きのつなぎ・先食い防止)"))
+    assert.ok(ch1.includes("カエデが屋上で弁当を広げるギャップ"))
+    assert.ok(ch1.includes("屋上の扉を開けるとカエデが立っていた"))
+    assert.ok(!ch1.includes("カエデが過去を語る"))
+    assert.ok(!ch1.includes("カエデの秘密が明かされる"))
+    // 次話にしか出ないカエデが第1話の P1 登場人物シートに混入しないこと
+    assert.ok(ch1.includes("この話に関わる人物の設定を載せています: アオイ。"))
+
+    // 次話プロットが無い第2話では次話抜粋を出さない
+    const ch2 = await novelContextExecute({ chapterNumber: 2 }, ctx)
+    assert.ok(!ch2.includes("## ⏭️ 次の話のプロット抜粋"))
+
+    // 文字数多めの ⚠️ にもごほうび削減防止の案内が付く
+    const longBody = `　${"あ".repeat(120)}。`
+    const saveLong = await novelSaveChapterExecute({ chapterNumber: 1, title: "多めテスト", content: longBody }, ctx)
+    assert.ok(saveLong.includes("多め"))
+    assert.ok(saveLong.includes("見どころやごほうびは削らず"))
   })
 })

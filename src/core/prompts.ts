@@ -5,20 +5,13 @@
  * 対立や教訓テーマの強制を避け、「フック・読者体験・キャラの魅力と掛け合い・テンポ」を軸に設計している。
  */
 
-import { CHAPTER_LENGTH, CHAPTER_WORD_TOLERANCE, DEFAULTS } from "./constants.js"
+import { CHAPTER_LENGTH, DEFAULTS } from "./constants.js"
 import type { StoryMode, Seriousness } from "./constants.js"
 import { storyModeLabel, seriousnessLabel } from "./utils.js"
 
 function fillTemplate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (_, key) => vars[key] ?? `{${key}}`)
 }
-
-/** 本文執筆プロンプト共通の文章方針（詳細な表記・反AI規約の正本は novel-writing skill） */
-const WRITING_STYLE_CORE = `✅ 感情のラベルやできあいの定型句に頼らず、キャラ固有の動作・台詞・語り手の声で書く
-✅ 話の終わりを道徳的な教訓や感動まとめで締めず、やり取り・余韻・引き・オチで切る
-✅ キャラごとに口調と語彙を書き分け、設定は場面や会話の中で自然に見せる
-✅ 表記規約と反AI基準は novel-writing skill に従う。自動整形は autoFix が有効な場合に適用する（省略時の動作はツールの引数説明を参照）
-✅ novel_context の視点人物の指定に従う。未解決の視点を代名詞や主人公という役割から推測しない`
 
 // ============================================================
 // 企画書（concept）
@@ -37,13 +30,14 @@ export const CONCEPT_PROMPT = `<system>
 1. フック（ひとことで言うと）：主人公 × 状況・設定 × 起きる面白いこと（40〜60文字目安）
 2. この作品の面白さ（読者体験の柱）：読者が味わう楽しさ・快感を 2〜3 点
 3. お約束とひとひねり：借りるジャンルのお約束 ＋ 1 点だけの独自のずらし・ギャップ
-4. トーンと NG ライン：全体の雰囲気、シリアス度（{seriousness}）、そして「この作品でやらないこと（NGライン）」
+4. トーンと NG ライン：全体の雰囲気、シリアス度（{seriousness}）、この作品の軽さに合う「物語を動かす摩擦・ままならなさ」（照れ・勘違い・制約・小さな困りごと等。空気系・いちゃラブなら小さなハプニングやシチュエーション変化）、そして「この作品でやらないこと（NGライン）」
 5. 語りと文体：視点、語り手のテンション、特殊書式の有無、あれば文体見本（任意・200〜600文字）
 6. 大まかな流れ：第1〜3話のつかみ → 中盤の楽しみ方 → 最初の見せ場／目指す方向
 
 【原則】
 - 教訓（学ぶべきテーマ）や無理な対立・ジレンマを捏造しない
 - 書き手が選んだシリアス度（{seriousness}）を守る。light なら重い過去・死・喪失・胸糞展開を入れない
+- 一方で全員が物分かりよく即解決して平坦にならないよう、トーンに合う軽い引っかかり（溜めの種）を 1 つ用意する
 - 「何が面白いから読まれるのか」を具体化する
 </task>
 
@@ -240,106 +234,6 @@ export const SCENES_PROMPT = `<system>
 </output>`
 
 // ============================================================
-// 本文執筆（chapter-write / chapter-continue）
-// ============================================================
-
-export const CHAPTER_WRITE_PROMPT = `<system>
-あなたは『{projectTitle}』の著者で、{genre}を書くライトノベル・Web小説作家です。
-キャラの魅力が伝わる生き生きした会話、読みやすいテンポ、読者を惹きつける語りを得意としています。
-</system>
-
-<task>
-第{chapterNumber}話「{chapterTitle}」の本文を書きます。
-- 目標文字数：{targetWordCount}文字（±${Math.round(CHAPTER_WORD_TOLERANCE * 100)}%）
-- 視点：{narrativePerspective}
-- シリアス度：{seriousness}
-- 本文だけを出力し、章見出しや注記は付けない
-</task>
-
-<outline priority="P0">
-{chapterOutline}
-</outline>
-
-<characters priority="P1">
-{charactersInfo}
-</characters>
-
-<previous_context priority="P1">
-{previousContext}
-</previous_context>
-
-<foreshadow priority="P2">
-{foreshadowReminders}
-</foreshadow>
-
-<memory priority="P2">
-{globalSummary}
-</memory>
-
-<constraints>
-【書きかた】
-✅ プロット（P0）の展開と見どころに従う
-✅ 企画書のトーン・NG ライン・語りと文体（文体見本があれば最優先）を守る
-✅ キャラの口調・一人称・二人称・呼び方を「ことばづかい」どおりに保つ
-✅ 同じ場面の中で視点人物を入れ替えない（替えるなら区切りの行で分ける）
-${WRITING_STYLE_CORE}
-
-【やらないこと】
-❌ 章タイトルや見出し行を本文に含める
-</constraints>
-
-<output>
-本文だけを出力してください。前置きや解説は入れず、場面か会話からスッと始めます。
-</output>`
-
-export const CHAPTER_CONTINUE_PROMPT = `<system>
-あなたは『{projectTitle}』の著者で、{genre}を書くライトノベル・Web小説作家です。
-</system>
-
-<task>
-第{chapterNumber}話「{chapterTitle}」の本文を書きます。
-- 目標文字数：{targetWordCount}文字（±${Math.round(CHAPTER_WORD_TOLERANCE * 100)}%）
-- 視点：{narrativePerspective}
-- シリアス度：{seriousness}
-</task>
-
-<previous_chapter_summary priority="P1">
-{previousChapterSummary}
-</previous_chapter_summary>
-
-<previous_chapter_tail priority="P1">
-{previousChapterTail}
-</previous_chapter_tail>
-
-<outline priority="P0">
-{chapterOutline}
-</outline>
-
-<characters priority="P1">
-{charactersInfo}
-</characters>
-
-<foreshadow priority="P2">
-{foreshadowReminders}
-</foreshadow>
-
-<constraints>
-【前の話とのつなぎ】
-✅ 前の話の引きを冒頭でしっかり受け、同じ出来事を繰り返さず先へ進める
-✅ 前の話の語りのテンション・テンポ・文体見本を引き継ぐ
-✅ 企画書のトーンと NG ラインを守り、「ことばづかい」（一人称・呼び方・敬語）を保つ
-${WRITING_STYLE_CORE}
-
-【やらないこと】
-❌ 書き出しで前の話の内容をなぞり直す
-❌ 章タイトルや見出し行を本文に含める
-</constraints>
-
-<output>
-本文だけを出力してください。前の話の末尾から自然につなぎます。
-</output>`
-
-// ============================================================
 // 点検・記録更新（consistency-check / character-state-update / summary-update）
 // ============================================================
 
@@ -477,8 +371,6 @@ export function listPromptTemplates(): string[] {
     "outline-short",
     "outline-detailed",
     "scenes",
-    "chapter-write",
-    "chapter-continue",
     "consistency-check",
     "character-state-update",
     "summary-update",
@@ -495,8 +387,6 @@ export function getPromptTemplate(name: string): string | null {
     "outline-short": OUTLINE_SHORT_PROMPT,
     "outline-detailed": OUTLINE_DETAILED_PROMPT,
     scenes: SCENES_PROMPT,
-    "chapter-write": CHAPTER_WRITE_PROMPT,
-    "chapter-continue": CHAPTER_CONTINUE_PROMPT,
     "consistency-check": CONSISTENCY_CHECK_PROMPT,
     "character-state-update": CHARACTER_STATE_UPDATE_PROMPT,
     "summary-update": SUMMARY_UPDATE_PROMPT,

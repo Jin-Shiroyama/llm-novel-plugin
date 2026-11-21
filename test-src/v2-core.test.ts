@@ -25,6 +25,8 @@ import {
 import { conceptParts, worldBuildingParts } from "../src/core/doc-sections.js"
 import { CONCEPT_TEMPLATE, WORLD_BUILDING_TEMPLATE } from "../src/core/templates.js"
 import { listPromptTemplates, buildPromptVars, getPromptTemplate } from "../src/core/prompts.js"
+import { getGuideContent } from "../src/tools/guide.js"
+import { extractNextOutlinePreview } from "../src/tools/context.js"
 import { parseSummaryInput, upsertSummarySections, LEGACY_HEADING } from "../src/core/records.js"
 
 function makeTempProject(): string {
@@ -589,6 +591,39 @@ describe("企画書・舞台設定の優先枠配分（doc-sections）", () => {
     assert.ok(!styleFilled.content.includes("未記入のままでも進められます"))
   })
 
+  test("conceptParts はトーン内の摩擦・ままならなさを優先枠で載せ、未記入行は除外し、独立見出しも優先する", () => {
+    const withFilledFriction = `# 『テスト』作品企画書
+
+## トーンと NG ライン
+- **全体の雰囲気**：笑える・掛け合い
+- **物語を動かす摩擦・ままならなさ**：素直になれない照れ隠しと時間の制約
+- **NG ライン（やらないこと）**：重い過去や教訓を足さない
+`
+    const parts = conceptParts(withFilledFriction, CONCEPT_TEMPLATE)
+    const tonePart = parts.find((p) => p.label.includes("NG"))
+    assert.ok(tonePart && tonePart.priority === true)
+    assert.ok(tonePart.content.includes("素直になれない照れ隠しと時間の制約"))
+
+    const withUnfilledFriction = `# 『テスト』作品企画書
+
+## トーンと NG ライン
+- **全体の雰囲気**：笑える・掛け合い
+- **物語を動かす摩擦・ままならなさ**：[この作品の軽さに合う引っかかり（例：照れ隠し・小さな勘違い・スキルの制約や条件・時間の縛り・無害なこだわりのぶつかり）。純粋な空気系・いちゃラブなら「小さなハプニングやシチュエーション変化のみ」]
+- **NG ライン（やらないこと）**：重い過去や教訓を足さない
+`
+    const partsUnfilled = conceptParts(withUnfilledFriction, CONCEPT_TEMPLATE)
+    const toneUnfilled = partsUnfilled.find((p) => p.label.includes("NG"))
+    assert.ok(toneUnfilled && !toneUnfilled.content.includes("物語を動かす摩擦・ままならなさ"))
+
+    const standalone = `# 『テスト』作品企画書
+
+## 物語を動かす摩擦・ままならなさ
+- 歩いた場所しか測れない制約
+`
+    const standaloneParts = conceptParts(standalone, CONCEPT_TEMPLATE)
+    assert.ok(standaloneParts.some((p) => p.label.includes("摩擦") && p.priority === true))
+  })
+
   test("worldBuildingParts はギミック・ルール・約束ごとに priority を立てる", () => {
     const doc = `# 『テスト』舞台・設定
 
@@ -608,12 +643,21 @@ describe("企画書・舞台設定の優先枠配分（doc-sections）", () => {
   })
 })
 
-describe("プロンプト一覧（prompts）", () => {
-  test("wuxia・reality を含まず、outline-episodic を含む", () => {
+describe("プロンプト一覧（prompts）と次話プロット抜粋", () => {
+  test("wuxia・reality および廃止済みの chapter-write / chapter-continue を含まず、outline-episodic を含む", () => {
     const names = listPromptTemplates()
     assert.ok(names.includes("outline-episodic"))
     assert.ok(!names.some((n) => n.includes("wuxia") || n.includes("reality") || n.includes("archetype")))
+    assert.ok(!names.includes("chapter-write"))
+    assert.ok(!names.includes("chapter-continue"))
+    assert.equal(getPromptTemplate("chapter-write"), null)
+    assert.equal(getPromptTemplate("chapter-continue"), null)
     assert.ok(getPromptTemplate("outline-episodic"))
+
+    const guide = getGuideContent("prompts")
+    assert.ok(!guide.includes("chapter-write"))
+    assert.ok(!guide.includes("chapter-continue"))
+    assert.ok(guide.includes("novel_context"))
 
     const vars = buildPromptVars({
       title: "放課後弁当",
@@ -625,5 +669,32 @@ describe("プロンプト一覧（prompts）", () => {
     })
     assert.equal(vars.targetWordCount, "3,000")
     assert.ok(vars.seriousness.includes("軽快"))
+  })
+
+  test("extractNextOutlinePreview は見出し・見どころ・入りのみを抜き出し、山場や引きを除外する", () => {
+    const outline = `## 第2話：雨宿りの約束
+
+- **視点キャラ**：悠真
+- **登場人物**：悠真、白瀬栞
+- **この話の見どころ**：急な夕立で二人が軒先へ駆け込む急接近
+- **話末の引き／オチ**：秘密の連絡先を交換する
+
+### 展開（3ビート）
+1. **入り**：帰り道に突然の大雨が降り出し、駅前の古書店へ飛び込む
+2. **転がし**：タオルを分け合って掛け合い
+3. **この話の山**：白瀬が初めて下の名前で呼ぶ
+`
+    const preview = extractNextOutlinePreview(outline)
+    assert.ok(preview)
+    assert.ok(preview.includes("### 第2話：雨宿りの約束"))
+    assert.ok(preview.includes("- 見どころ: 急な夕立で二人が軒先へ駆け込む急接近"))
+    assert.ok(preview.includes("- 入り: 帰り道に突然の大雨が降り出し、駅前の古書店へ飛び込む"))
+    assert.ok(!preview.includes("下の名前で呼ぶ"))
+    assert.ok(!preview.includes("秘密の連絡先"))
+
+    // 見どころ・入り欄が無い自由書式メモや未記入プレースホルダのみなら、先食い防止のため null
+    const freeform = "## 第3話：テスト勉強\n- **視点キャラ**：悠真\n図書館の自習室でテスト対策を始める。\n"
+    assert.equal(extractNextOutlinePreview(freeform), null)
+    assert.equal(extractNextOutlinePreview("## 第2話：[未定]\n- **この話の見どころ**：[見どころ]\n"), null)
   })
 })

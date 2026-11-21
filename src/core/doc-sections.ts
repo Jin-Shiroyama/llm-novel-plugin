@@ -40,7 +40,7 @@ export function worldBuildingParts(content: string, template: string): DocPart[]
 export function conceptParts(content: string, template: string): DocPart[] {
   return templateDocParts(content, template, {
     fileLabel: "concept.md",
-    priority: /フック|面白さ|トーン|NG|語り|文体/,
+    priority: /フック|面白さ|トーン|NG|摩擦|ままなら|語り|文体/,
     skip: /^基本情報/,
   })
 }

@@ -1,0 +1,15 @@
+{
+  "items": [
+    {
+      "id": "F1",
+      "title": "古い測量紋章の羅針盤片",
+      "content": "第1層の隠し部屋で見つけた金属片に、初代測量士ギルドと同じ六角星の目盛りが刻まれている",
+      "category": "謎・遺物",
+      "status": "pending",
+      "plantChapter": 1,
+      "targetChapter": 4,
+      "resolvedChapter": null,
+      "notes": "第1話で発見し、第2話でバルドが意味深な反応を見せ、第4話で正体が明かされる"
+    }
+  ]
+}

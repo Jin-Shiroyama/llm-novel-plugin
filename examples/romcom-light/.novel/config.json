@@ -1,0 +1,31 @@
+{
+  "title": "雨の日のコインランドリー、無口な先輩の片方靴下を毎回探す羽目になる",
+  "genre": "ラブコメ",
+  "storyMode": "episodic",
+  "tone": "笑える・掛け合い、ニヤニヤ・甘い",
+  "seriousness": "light",
+  "worldBuilding": "minimal",
+  "indent": "none",
+  "targetWords": 30000,
+  "chapterCount": 10,
+  "narrativePerspective": "一人称",
+  "defaultPovCharacter": "水野航",
+  "chapterUnit": "話",
+  "serial": true,
+  "limits": {
+    "previousChapterTail": 1200,
+    "characterProfiles": 6000,
+    "summary": 4000,
+    "scenes": 4000,
+    "speech": 1500,
+    "characterState": 3000,
+    "outlineBrief": 4000,
+    "concept": 4000,
+    "worldBuilding": 6000,
+    "glossary": 3000,
+    "canon": 6000
+  },
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z",
+  "currentPhase": "writing"
+}
