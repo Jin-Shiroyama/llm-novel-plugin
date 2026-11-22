@@ -4,6 +4,7 @@ import { readFileSync, readdirSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import pluginModule from "../src/index.js"
+import * as toolsEntry from "../src/tools/index.js"
 import { mergeAgentConfig } from "../src/adapters/opencode/agent-config.js"
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
@@ -67,5 +68,31 @@ describe("OpenCode アダプタ層とハーネス非依存性", () => {
         assert.ok(!content.includes("@opencode-ai"), `src/${sub}/${file} が @opencode-ai に依存しています`)
       }
     }
+  })
+
+  test("依存方向ガード: src/core が src/tools や src/adapters に依存せず、src/tools/index.ts が8ツールを公開する", () => {
+    const coreDir = join(root, "src", "core")
+    for (const file of readdirSync(coreDir)) {
+      if (!file.endsWith(".ts")) continue
+      const content = readFileSync(join(coreDir, file), "utf-8")
+      assert.ok(
+        !/from\s+["']\.\.\/(?:tools|adapters)\//.test(content),
+        `src/core/${file} が上位層（tools/adapters）に依存しています`,
+      )
+    }
+
+    assert.deepEqual(
+      Object.keys(toolsEntry).filter((k) => k.endsWith("Execute")).sort(),
+      [
+        "novelCheckExecute",
+        "novelContextExecute",
+        "novelExportExecute",
+        "novelGuideExecute",
+        "novelInitExecute",
+        "novelSaveChapterExecute",
+        "novelStatusExecute",
+        "novelUpdateExecute",
+      ],
+    )
   })
 })

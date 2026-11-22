@@ -543,4 +543,194 @@ describe("E2E ワークフロー: ジャンル別（ラブコメ／ファンタ�
     assert.ok(!ch1WithBoardInterlude.includes("## ⏭️ 次の"))
     assert.ok(!ch1WithBoardInterlude.includes("初めての森探索"))
   })
+
+  test("novel_save_chapter の edits 部分置換（完全一致・整形フォールバック・行途中照合・旧稿退避・類似行ヒント・各種エラー）", async () => {
+    const dir = makeDir()
+    const ctx = { projectDir: dir }
+    await novelInitExecute(
+      { title: "部分置換テスト", genre: "現代ファンタジー", targetWords: 1000, chapterCount: 1 },
+      ctx,
+    )
+
+    // 未保存ファイルへの edits はエラー
+    const missingOut = await novelSaveChapterExecute(
+      { chapterNumber: 1, edits: [{ from: "廊下", to: "階段" }] },
+      ctx,
+    )
+    assert.match(missingOut, /^❌ 第1話は保存していません。既存の本文ファイル/)
+
+    // まず未整形の下書きを保存（自動整形で字下げ・！？空白・三点リーダ・会話末句点が整形される）
+    const initialBody = [
+      "放課後の廊下を走った!間に合うか。",
+      "「待ってくれ。」",
+      "...窓の外でチャイムが鳴る。",
+      "同じ言葉がここにある!",
+      "同じ言葉がここにある!",
+    ].join("\n")
+    const firstSave = await novelSaveChapterExecute(
+      { chapterNumber: 1, title: "放課後の疾走", content: initialBody },
+      ctx,
+    )
+    assert.ok(firstSave.includes("✅ 第1話「放課後の疾走」を保存しました"))
+    const chPath = join(dir, ".novel/chapters/chapter-001.md")
+    const afterFirst = readFileSync(chPath, "utf-8")
+    assert.ok(afterFirst.includes("　放課後の廊下を走った！　間に合うか。\n「待ってくれ」\n……窓の外でチャイムが鳴る。"))
+
+    // 1. 完全一致での部分置換（title 省略時は既存タイトル維持、置換前原稿が .novel/drafts/ に退避され、置換後の自動整形も走る）
+    const exactOut = await novelSaveChapterExecute(
+      {
+        chapterNumber: 1,
+        edits: [{ from: "「待ってくれ」", to: "「待ってくれよ。」" }],
+      },
+      ctx,
+    )
+    assert.ok(exactOut.includes("✅ 第1話「放課後の疾走」を保存しました"))
+    assert.ok(exactOut.includes("✏️ 部分置換を適用しました（1件）"))
+    assert.ok(!exactOut.includes("自動整形後の文面へ照合"))
+    assert.ok(exactOut.includes("🗂️ 前の原稿を残しました"))
+    assert.ok(exactOut.includes("✨ 表記を自動整形しました"))
+    const afterExact = readFileSync(chPath, "utf-8")
+    assert.ok(afterExact.includes("「待ってくれよ」"))
+    // 退避された旧稿に置換前の「待ってくれ」が残っていること
+    const draftFiles = readdirSync(join(dir, ".novel/drafts"))
+      .filter((f) => f.startsWith("chapter-001") && !f.includes("before-fix"))
+      .sort()
+    assert.equal(draftFiles.length, 1)
+    assert.ok(readFileSync(join(dir, ".novel/drafts", draftFiles[0]), "utf-8").includes("「待ってくれ」"))
+
+    // 2. 第2段フォールバック照合: 自動整形前の記憶（字下げなし・半角!・...）でも照合成功し、行途中スニペットも吸収する
+    const fallbackOut = await novelSaveChapterExecute(
+      {
+        chapterNumber: 1,
+        title: "夕暮れの疾走",
+        edits: [
+          { from: "廊下を走った!間に合うか。", to: "階段を駆け上がった！　まだ間に合う。" },
+          { from: "...窓の外でチャイムが鳴る。", to: "……遠くでチャイムが鳴り響く。" },
+        ],
+      },
+      ctx,
+    )
+    assert.ok(fallbackOut.includes("✅ 第1話「夕暮れの疾走」を保存しました"))
+    assert.ok(fallbackOut.includes("✏️ 部分置換を適用しました（2件）"))
+    assert.ok(fallbackOut.includes("ℹ️ edits の1件目・2件目は自動整形後または抜粋復元後の文面へ照合して置換しました"))
+    const afterFallback = readFileSync(chPath, "utf-8")
+    assert.ok(afterFallback.includes("　放課後の階段を駆け上がった！　まだ間に合う。"))
+    assert.ok(afterFallback.includes("……遠くでチャイムが鳴り響く。"))
+
+    // 2a. 自動整形前の下書き（単独 … ＋ 会話末句点）を from・to ともに渡しても抜粋誤判定で拒否されず置換＆自動整形される
+    await novelSaveChapterExecute(
+      { chapterNumber: 3, title: "下書き記憶テスト", content: "「…わかった。」" },
+      ctx,
+    )
+    const draftMemoryOut = await novelSaveChapterExecute(
+      { chapterNumber: 3, edits: [{ from: "…わかった。」", to: "…わかったよ。」" }] },
+      ctx,
+    )
+    assert.ok(draftMemoryOut.includes("✅ 第3話「下書き記憶テスト」を保存しました"))
+    assert.ok(draftMemoryOut.includes("規約から外れた箇所はありません"))
+    const ch3Saved = readFileSync(join(dir, ".novel/chapters/chapter-003.md"), "utf-8")
+    assert.ok(ch3Saved.includes("「……わかったよ」"))
+
+    // 2b. 保存レポート・novel_check の抜粋（□ と両端の単独 …）をそのまま from に渡すケース
+    const badLine = "「待って！　まだ話は終わっていないんだぞ、本当にこれでいいのか（開きっぱなし"
+    const saveWithError = await novelSaveChapterExecute(
+      { chapterNumber: 2, title: "抜粋テスト", content: badLine },
+      ctx,
+    )
+    assert.ok(saveWithError.includes("❌ 規約違反"))
+    // 保存レポートに出た実際の抜粋行を抽出（□ と末尾の単独 … の両方を含む: 「待って！□まだ話…）
+    const excerptMatch = saveWithError.match(/\n\s+([^\n]*□[^\n]*…)\n/)
+    assert.ok(excerptMatch, `保存レポートに □ と … を含む抜粋が出ること:\n${saveWithError}`)
+    const rawExcerpt = excerptMatch[1].trim()
+    // to に抜粋記号（□ や単独 …）が残ったままだと本文破壊を防ぐため拒否される
+    const unsafeExcerptEdit = await novelSaveChapterExecute(
+      { chapterNumber: 2, edits: [{ from: rawExcerpt, to: `${rawExcerpt}」` }] },
+      ctx,
+    )
+    assert.match(unsafeExcerptEdit, /^❌ 第2話は保存していません。edits の1件目の to に抜粋記号/)
+    // to がクリーンな本文断片であれば抜粋復元照合で1件一致して置換できる
+    const cleanedTarget = rawExcerpt.replace(/□/g, "　").replace(/^…(?!…)/, "").replace(/(?<!…)…$/, "")
+    const excerptFixOut = await novelSaveChapterExecute(
+      {
+        chapterNumber: 2,
+        edits: [
+          { from: rawExcerpt, to: cleanedTarget.replace("待って", "少し待って") },
+          { from: "（開きっぱなし", to: "（解決済み）」" },
+        ],
+      },
+      ctx,
+    )
+    assert.ok(excerptFixOut.includes("✅ 第2話「抜粋テスト」を保存しました"))
+    assert.ok(excerptFixOut.includes("ℹ️ edits の1件目は自動整形後または抜粋復元後の文面へ照合して置換しました"))
+    assert.ok(excerptFixOut.includes("規約から外れた箇所はありません"))
+    const ch2Saved = readFileSync(join(dir, ".novel/chapters/chapter-002.md"), "utf-8")
+    assert.ok(ch2Saved.includes("「少し待って！　まだ話は終わっていないんだぞ、本当にこれでいいのか（解決済み）」"))
+    assert.ok(!ch2Saved.includes("□"))
+
+    // 3. 同一結果の置換では重複退避されない
+    const sameOut = await novelSaveChapterExecute(
+      {
+        chapterNumber: 1,
+        edits: [{ from: "「待ってくれよ」", to: "「待ってくれよ」" }],
+      },
+      ctx,
+    )
+    assert.ok(sameOut.includes("前に保存した内容と同じでした"))
+
+    // 4. 0件一致エラー: ファイル不変（前の edits が成功していても全体ロールバック）＆保存後の本文から近い行の現在文面が切られず提示される
+    const longUniqueLine = "　夕焼けの差し込む図書室の長いテーブルの向こう側で、彼女は古い地図の端を指先でそっとなぞりながら、まだ誰にも見つかっていない秘密の階段の話を落ち着いた声で語り始めたのだった。"
+    await novelSaveChapterExecute(
+      {
+        chapterNumber: 1,
+        edits: [{ from: "……遠くでチャイムが鳴り響く。", to: `……遠くでチャイムが鳴り響く。\n${longUniqueLine}` }],
+      },
+      ctx,
+    )
+    const snapshot = readFileSync(chPath, "utf-8")
+    const missOut = await novelSaveChapterExecute(
+      {
+        chapterNumber: 1,
+        edits: [
+          { from: "「待ってくれよ」", to: "「行かないでくれ」" },
+          { from: "夕焼けの差し込む図書室の長いテーブルの向こう側で彼女は別の話を始めた。", to: "書き換え" },
+        ],
+      },
+      ctx,
+    )
+    assert.match(missOut, /^❌ 第1話は保存していません。edits の2件目の from に一致する箇所が本文に見つかりませんでした/)
+    assert.ok(missOut.includes("保存後の本文で近い行"))
+    // 80字超の行も途中で「…」付きに切られず原文全文が提示されること
+    assert.ok(missOut.includes(`6行目: ${longUniqueLine}`))
+    assert.equal(readFileSync(chPath, "utf-8"), snapshot)
+
+    // 5. 複数一致（完全一致・整形後フォールバックともに）で曖昧エラー＆ファイル不変
+    const dupExact = await novelSaveChapterExecute(
+      { chapterNumber: 1, edits: [{ from: "　同じ言葉がここにある！", to: "変更" }] },
+      ctx,
+    )
+    assert.match(dupExact, /edits の1件目の from が本文中の 2 箇所に一致しました/)
+    assert.equal(readFileSync(chPath, "utf-8"), snapshot)
+
+    const dupFallback = await novelSaveChapterExecute(
+      { chapterNumber: 1, edits: [{ from: "同じ言葉がここにある!", to: "変更" }] },
+      ctx,
+    )
+    assert.match(dupFallback, /edits の1件目の from（自動整形後の文面）が本文中の 2 箇所に一致しました/)
+    assert.equal(readFileSync(chPath, "utf-8"), snapshot)
+
+    // 6. 引数バリデーション（排他・未指定・空配列・空from）
+    assert.match(
+      await novelSaveChapterExecute(
+        { chapterNumber: 1, title: "両方", content: "本文", edits: [{ from: "a", to: "b" }] },
+        ctx,
+      ),
+      /同時に指定できません/,
+    )
+    assert.match(await novelSaveChapterExecute({ chapterNumber: 1 }, ctx), /どちらか一方を指定/)
+    assert.match(await novelSaveChapterExecute({ chapterNumber: 1, edits: [] }, ctx), /1件以上の置換/)
+    assert.match(
+      await novelSaveChapterExecute({ chapterNumber: 1, edits: [{ from: "", to: "x" }] }, ctx),
+      /edits の1件目には空でない from/,
+    )
+  })
 })

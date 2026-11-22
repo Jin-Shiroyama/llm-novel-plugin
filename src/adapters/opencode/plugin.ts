@@ -96,12 +96,23 @@ export function createOpenCodePlugin(pluginRoot: string): Plugin {
         }),
 
         novel_save_chapter: tool({
-          description: `書き上げた1話を chapters ディレクトリに保存する。連番付け・文字数と目安（±15%）の比較・旧稿の .novel/drafts/ 退避・表記の点検を行う。自動整形は autoFix が有効なときに行う（既定 ${DEFAULT_AUTO_FIX ? "ON" : "OFF"}）。
+          description: `書き上げた1話を chapters ディレクトリに保存する。連番付け・文字数と目安（±15%）の比較・旧稿の .novel/drafts/ 退避・表記と文章の点検を行う。自動整形は autoFix が有効なときに行う（既定 ${DEFAULT_AUTO_FIX ? "ON" : "OFF"}）。
+新規保存や大規模な全面書き直しは title＋content を渡し、保存済み本文への小規模な手直しは edits（[{ from, to }]）を渡す（content と edits は排他）。
 プロローグ・幕間・エピローグは section で指定する。`,
           args: {
             ...sectionArgs("保存する"),
-            title: z.string().describe("サブタイトル（話タイトル）"),
-            content: z.string().describe("本文。見出し行は含めない"),
+            title: z.string().optional().describe("サブタイトル（話タイトル）。content 指定時は必須。edits 指定時は省略すると既存タイトルを維持する"),
+            content: z.string().optional().describe("本文（全文保存・全面書き直し用。見出し行は含めない）。edits とは同時指定不可"),
+            edits: z
+              .array(
+                z.object({
+                  from: z.string().min(1).describe("置換前の箇所（保存後の本文ファイルを読んで写す。点検結果の抜粋は場所の目印にだけ使う。完全一致しない場合は自動整形後・抜粋復元後の文面でも再照合する）"),
+                  to: z.string().describe("置換後の文字列"),
+                }),
+              )
+              .min(1)
+              .optional()
+              .describe("保存済み本文への部分置換（小規模修正用。旧稿退避・自動整形・点検をすべて通す）。content とは同時指定不可"),
             updateState: z.boolean().optional().describe("保存後に記録更新の案内を出すかどうか。既定 true"),
             autoFix: z.boolean().optional().describe(`機械的に直せる表記（会話末の句点・半角!?・字下げなど）を保存時に自動整形するかどうか。既定 ${DEFAULT_AUTO_FIX}`),
           },

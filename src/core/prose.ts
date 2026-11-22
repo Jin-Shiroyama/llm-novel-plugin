@@ -95,9 +95,16 @@ const PHRASES: PhraseRule[] = [
   {
     rule: "stock-phrase",
     phrase: "思わず",
-    pattern: /思わず|ずにはいられな/g,
+    pattern: /思わず/g,
+    allowed: 1,
+    advice: "3,000字あたり1回まで。連発するときは修飾を外し、キャラの具体的な動きや反応をそのまま書く",
+  },
+  {
+    rule: "stock-phrase",
+    phrase: "〜ずにはいられない",
+    pattern: /ずにはいられな/g,
     allowed: 0,
-    advice: "修飾を外し、キャラの具体的な動きや反応をそのまま書く",
+    advice: "翻訳調・定型表現を避け、キャラの具体的な動きや発話を直接書く",
   },
   {
     rule: "stock-phrase",

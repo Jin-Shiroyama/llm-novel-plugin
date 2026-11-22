@@ -23,7 +23,7 @@ llm-novel-plugin/
 ├── src/
 │   ├── index.ts                          # OpenCode プラグイン入口（{ id, server }）
 │   ├── core/                             # ハーネス非依存コアエンジン
-│   │   ├── index.ts                      # コア＆ツール関数の公開入口（将来の MCP 層が参照）
+│   │   ├── index.ts                      # コア層の公開入口（tools へは依存しない）
 │   │   ├── constants.ts                  # 既定値・構成型・シリアス度・ジャンルスキル・判定キーワード
 │   │   ├── utils.ts                      # パス・ファイル・進行判定・ジャンル解決・文字数
 │   │   ├── records.ts                    # 記録検証（character-state / foreshadow / summary）
@@ -45,6 +45,7 @@ llm-novel-plugin/
 │   │   ├── templates.ts                  # 文書雛形（Markdown / JSON）
 │   │   └── prompts.ts                    # RTCO プロンプト集
 │   ├── tools/                            # ハーネス非依存ツール実行関数（{ projectDir }）
+│   │   ├── index.ts                      # ツール層の公開入口（llm-novel-plugin/tools）
 │   │   ├── types.ts                      # ToolRuntimeContext = { projectDir: string }
 │   │   ├── init.ts                       # novel_init
 │   │   ├── status.ts                     # novel_status
@@ -128,7 +129,8 @@ pnpm check:ja    # 簡体字・中国語残存チェック
 ## 重要な決めごと
 
 - `src/index.ts` は OpenCode プラグインオブジェクト `{ id, server }` のみを default export する（余計な named export をしない）。
-- `src/tools/*.ts` は `ToolRuntimeContext`（`{ projectDir: string }`）のみを受け取り、`@opencode-ai/plugin` に依存しない。
+- `src/tools/*.ts` は `ToolRuntimeContext`（`{ projectDir: string }`）のみを受け取り、`@opencode-ai/plugin` に依存しない。ツール実行関数の公開入口は `src/tools/index.ts`（`llm-novel-plugin/tools`）に置き、`src/core/` は `src/tools/` や `src/adapters/` に依存しない。
+- ハーネス拡張方針（開発者メモ）：MCP サーバー化できる範囲はツール層（8ツール）であり、コマンド（`argument-hint` 付き）・スキル・エージェント資産を活かす第 2 の対応先としては Claude Code プラグイン（commands / skills / agents ＋ MCP サーバー）が自然。`src/core/index.ts` の `export *` 絞り込みによる安定公開 API の確定は、MCP 層に着手する段階で行う。
 - `skills/*/SKILL.md` 内の ` ```text ` 作例はすべて `checkTypography`（規約違反 0 件）と `checkProse`（検出 0 件）を通過することをテストで保証する。
 - `novel_context` は `concept.md` のフック・面白さ・トーン・NG ラインに優先枠を割り当て、毎話必ず注入する。
 - `novel_export` の既定単位は `"話"`（`第1話　タイトル`・算用数字）、`split: true` で投稿サイト向けの 1 話分割書き出し＋`index.txt` を出力する。

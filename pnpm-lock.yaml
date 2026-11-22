@@ -8,13 +8,13 @@ importers:
 
   .:
     dependencies:
-      '@opencode-ai/plugin':
-        specifier: '>=1.4.0'
-        version: 1.4.3
       zod:
         specifier: ^3.24.0
         version: 3.25.76
     devDependencies:
+      '@opencode-ai/plugin':
+        specifier: ^1.4.0
+        version: 1.4.3
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.17

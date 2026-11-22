@@ -20,11 +20,11 @@
 
 `dist/index.js` は 1 つ上のディレクトリを基準に `commands/` と `skills/` を読み込むため、**変更前のプラグインは `dist/` だけでなくリポジトリ一式で取り出してビルド**します（`git worktree add` が手軽です）。
 
-基準となる変更前コミットは `927411d` です（別の変更を比べたい場合は、その直前のコミットハッシュへ置き換えてください）。
+基準となる変更前コミット（`<比較元コミット>`：例 `HEAD~1` や比較したい基準タグ・ハッシュ）を worktree で取り出してビルドします。
 
 ```bash
 # 変更前のプラグインを一式取り出してビルドする
-git worktree add /tmp/llm-novel-plugin-before 927411d
+git worktree add /tmp/llm-novel-plugin-before <比較元コミット>
 cd /tmp/llm-novel-plugin-before
 pnpm install && pnpm build   # pnpm が無い環境では npm ci && npm run build
 

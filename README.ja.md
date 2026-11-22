@@ -1,7 +1,7 @@
 # llm-novel-plugin
 
 ライトノベル・Web小説（ファンタジー、SF、ラブコメ、学園日常、スローライフ、二次創作）の執筆に特化した LLM 向けプラグインです。
-現在は **OpenCode プラグイン** として利用でき、コア層をハーネス非依存に分離しているため、将来の **MCP サーバー化** にも対応できます。
+現在は **OpenCode プラグイン** として利用できます。ツール実行層（`./tools`）とコア層（`./core`）をハーネス非依存に分離しているため、将来の **MCP サーバー化** にも対応できる設計です（コマンド・スキル・エージェントの進行定義は現在 OpenCode 向け）。
 
 ## 主な特徴
 
@@ -30,6 +30,8 @@ pnpm install
 pnpm build
 ```
 
+- `package.json` に `prepare` スクリプトを同梱しているため、リポジトリ直下での `pnpm install`（または `npm install`）時に `dist/` もビルドされます。別プロジェクトの依存として git 経由で導入した場合、pnpm 10 以降のように依存パッケージのビルドスクリプトが既定で無効な環境では自動実行されないため、`pnpm approve-builds` で許可するか手動で `pnpm build` を実行してください。
+
 `opencode.json` の設定例（ビルド済みローカルファイルで読み込む場合）：
 
 ```json
@@ -38,12 +40,16 @@ pnpm build
   "plugin": ["file:///path/to/llm-novel-plugin/dist/index.js"],
   "agent": {
     "novel-writer": {
-      "model": "<provider>/<model>"
+      "model": "<provider>/<writer-model>"
+    },
+    "novel-editor": {
+      "model": "<provider>/<editor-model>"
     }
   }
 }
 ```
 
+- **書き手（`novel-writer`）と編集者（`novel-editor`）には別のモデルを割り当てることをおすすめします**。同じモデルで書いた本文を自分で点検すると評価が甘くなりがちなため、`/novel-review` や `/write-chapters --revise` で別モデルの視点を入れると品質が安定します。
 - `plugin` にはビルド後のエントリポイント（`dist/index.js`）までの `file://` パスを指定してください（環境や OpenCode のバージョンにより記法が異なる場合は公式ドキュメントをご確認ください）。
 - 既定の権限では `novel-writer` / `novel-editor` の `bash` は `deny`、`novel-planner` は `ask` に設定されています。`git` などを使いたい場合は `opencode.json` の `agent.<name>.permission.bash` で上書きできます。
 
@@ -68,7 +74,7 @@ pnpm build
 
 - 人物名はファイル名・名前欄の明示的な区切り・呼称欄を使って照合します。姓名を文字数で推測しないため、呼称欄に本文で使う姓・名・あだ名を記入してください（未記入は `/novel-status` で確認できます）。
 - 状態更新は一意に特定できる正式名へ統一します。兄妹の共通の姓など、曖昧な呼称での更新は保存せず候補を示します。既存の名前の揺れは読み込み時に解決し、元データを一括で書き換えません。
-- 保存時は安全な表記修正を既定で自動整形します（整形せずに保存する場合は `novel_save_chapter(autoFix: false)`、既存ファイルの一括整形は `novel_check(fix: true)` を指定してください）。
+- 保存時は安全な表記修正を既定で自動整形します（整形せずに保存する場合は `novel_save_chapter(autoFix: false)`、既存ファイルの一括整形は `novel_check(fix: true)` を指定してください）。保存済み本文の小規模な手直しには `novel_save_chapter(..., edits: [{ from, to }])` を使うと、全文を出力し直さずに旧稿退避・自動整形・点検を通せます。
 - 傍点の対象範囲とルビの読みを保持します。裸の URL と日本語の境界が曖昧な場合は整形を見送り、URL を空白や `<...>` で区切るよう案内します。
 
 ## 開発・テスト

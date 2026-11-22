@@ -46,7 +46,7 @@ agent: novel-editor
 - `novel-editing` skill の「点検結果の雛形」（`--focus=consistency` のみ表形式）で返す
 - **必ず「よく書けていたところ」を先に具体的に挙げる**
 - 指摘はすべて「何が起きているか ＋ 直す前／直した後」で手を動かせる形にする
-- 書き手が同意すれば、直した本文を `novel_save_chapter` で保存する
+- 書き手が同意すれば修正を反映する。部分修正は保存後の本文ファイルを読んで `from` を写した `novel_save_chapter(..., edits: [{ from, to }])` を使い（点検結果の抜粋は場所の目印にだけ使う）、大規模な全面書き直しは `novel_save_chapter(..., title, content)` で保存する
 
 ## 約束
 

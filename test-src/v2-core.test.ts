@@ -388,6 +388,22 @@ describe("文章の点検（prose）: 反AIと教訓まとめ検出", () => {
     assert.equal(checkProse(light).length, 0)
   })
 
+  test("「思わず」は3,000字あたり1回まで許容し2回目から検出、「〜ずにはいられない」は1回で検出する", () => {
+    const once = "　予想外の答えに、俺は思わず吹き出した。"
+    assert.equal(checkProse(once).length, 0)
+
+    const twice = [
+      "　予想外の答えに、俺は思わず吹き出した。",
+      "　次の台詞にも思わず肩を揺らす。",
+    ].join("\n")
+    const omowazuIssues = checkProse(twice).filter((i) => i.phrase === "思わず")
+    assert.equal(omowazuIssues.length, 1)
+
+    const zuni = "　その光景に、俺は笑わずにはいられなかった。"
+    const zuniIssues = checkProse(zuni).filter((i) => i.phrase === "〜ずにはいられない")
+    assert.equal(zuniIssues.length, 1)
+  })
+
   test("「その瞬間／次の瞬間」は1話1回まで許容し、2回目から検出する", () => {
     const once = "　剣を振り下ろした。次の瞬間、石壁が真っ二つに割れた。"
     assert.equal(checkProse(once).length, 0)

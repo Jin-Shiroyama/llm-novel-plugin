@@ -71,7 +71,7 @@ agent: novel-planner
 ```
 3. **リライトと確定記録（`リライト推奨` のときのみ・最大 1 回）**：
    - `subagent_type`: `novel-writer` / `description`: `第{N}話を講評に沿って書き直す`
-   - `novel-editor` の「よい点」「直す点」を渡し、**まず保存済みの `.novel/chapters/chapter-{NNN}.md` と `novel_context(chapterNumber: {N})` を読んでから**、よい点と文体の勢いを保ったまま指摘箇所を中心に手直しする（ゼロから全面的に書き直さない）よう指示する。手直し後に `novel_save_chapter` で保存・機械点検（❌解消）し、確定稿の内容で `novel_update`（`character-state`・`summary`・`foreshadow`）とシーン `[x]` を更新して通常モードと同じ報告形式で返させる。
+   - `novel-editor` の「よい点」「直す点」を渡し、**まず保存済みの `.novel/chapters/chapter-{NNN}.md` と `novel_context(chapterNumber: {N})` を読んでから**、よい点と文体の勢いを保ったまま指摘箇所を中心に手直しする（ゼロから全面的に書き直さない）よう指示する。保存は原則として保存済み本文から `from` を写した `novel_save_chapter(chapterNumber: {N}, edits: [{ from, to }])` を使い（構成を大きく組み替える場合のみ `title`＋`content` で全文保存）、機械点検（❌解消）のうえ確定稿の内容で `novel_update`（`character-state`・`summary`・`foreshadow`）とシーン `[x]` を更新して通常モードと同じ報告形式で返させる。
 
 ### 任意の簡易レビュー（`--review-every=N` 指定かつ `--revise` なし時のみ）
 

@@ -49,7 +49,7 @@ test("表示行の字下げを保持し、連続する中黒を先に三点リ�
     assert.deepEqual(result.unconvergedLines, [])
   }
   assert.ok(checkTypography("　#拡散希望！続き").some(i => i.rule === "exclamation-space"))
-  assert.ok(checkProse("　#拡散希望。思わず声を上げた。").length > 0)
+  assert.ok(checkProse("　#拡散希望。静寂が支配した。").length > 0)
 })
 
 test("約物の役割を正規化前から判定し、仮の空白修正を数えない", () => {

@@ -256,7 +256,7 @@ export function summarizeForSave(
     .join("、")
   let out = `📝 表記: ❌ 規約違反 ${errors}件 / ⚠️ 確認 ${issues.length - errors}件（${counts}）\n`
   for (const issue of issues.slice(0, shown)) out += `  ${formatIssue(issue).replace(/\n/g, "\n  ")}\n`
-  out += `  → novel_check(${sectionCallArgs(section)}) で全件を見て、直してから保存し直してください\n`
+  out += `  → novel_check(${sectionCallArgs(section)}) で全件を確認し、小規模な手直しは保存後の本文ファイルを読んで from を写した novel_save_chapter(${sectionCallArgs(section)}, edits: [{ from, to }]) で部分置換してください（点検結果の抜粋は場所の目印にだけ使う。全面書き直しは title＋content で保存）\n`
   return out
 }
 
