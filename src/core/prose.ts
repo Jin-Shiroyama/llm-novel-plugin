@@ -286,13 +286,13 @@ const OPEN = new Set(["「", "『"])
 const CLOSE = new Set(["」", "』"])
 const SENTENCE_END = new Set(["。", "！", "？"])
 
-interface Sentence {
+export interface Sentence {
   start: number
   text: string
   period: boolean
 }
 
-function splitSentences(chars: string[]): { sentences: Sentence[]; inDialogue: boolean[] } {
+export function splitSentences(chars: string[]): { sentences: Sentence[]; inDialogue: boolean[] } {
   const sentences: Sentence[] = []
   const inDialogue: boolean[] = []
   let depth = 0

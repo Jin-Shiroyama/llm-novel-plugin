@@ -38,6 +38,7 @@ llm-novel-plugin/
 │   │   ├── text-analysis.ts              # 行種別・表示文字対応・保護範囲の共通解析
 │   │   ├── typography.ts                 # 表記点検と安全な自動整形（indent: fullwidth / none 対応）
 │   │   ├── prose.ts                      # 反AI・教訓まとめ・話末の定型締め・話またぎ重複点検
+│   │   ├── style-metrics.ts              # 文体見本と本文の文体距離メトリクス（平均・比率）
 │   │   ├── glossary.ts                   # 用語集の読み込み・動的抽出・禁止表記点検
 │   │   ├── canon.ts                      # 二次創作の原作資料（.novel/canon/）
 │   │   ├── publish.ts                    # 投稿情報（publish.md）の文字数・タグ数点検
@@ -84,7 +85,9 @@ llm-novel-plugin/
 │   ├── romcom-light/                     # ラブコメ・軽快（episodic / light / minimal / indent: none）
 │   └── fantasy-balanced/                 # 異世界ファンタジー・標準（arc / balanced / standard / indent: fullwidth）
 ├── scripts/
-│   └── check-japanese.mjs                # 簡体字・中国語残存チェック
+│   ├── check-japanese.mjs                # 簡体字・中国語残存チェック
+│   ├── eval-runner.mjs                   # 半自動評価ランナー（run / metrics / compare）
+│   └── eval/                             # 評価ランナーモジュール（LLMクライアント・ローダー・執筆・指標・審査）
 └── test-src/                             # テスト（node:test）
 ```
 
