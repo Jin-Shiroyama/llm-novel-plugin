@@ -182,7 +182,7 @@ function formatRunSummaryMarkdown(meta, summary) {
     : "n/a"
   const st = meta.executionStats
   const statsLine = st
-    ? `- **実行内訳**: 成功=${st.okChapters}話 / 記録一部失敗=${st.partialRecordErrorChapters}話 / 執筆・保存失敗=${st.failedChapters}話 / 外部中断=${st.abortedRuns ?? 0}試行（再試行: 執筆形式=${st.writerFormatRetries ?? st.writerRetries}, 空応答=${st.emptyResponseRetries ?? 0}, 記録=${st.recordRetries}, API一時障害=${st.transientApiRetries}${(st.lengthTruncatedAttempts ?? 0) > 0 ? `, length打切=${st.lengthTruncatedAttempts}` : ""}）`
+    ? `- **実行内訳**: 成功=${st.okChapters}話 / 記録一部失敗=${st.partialRecordErrorChapters}話 / 執筆・保存失敗=${st.failedChapters}話 / 外部中断=${st.abortedRuns ?? 0}試行（再試行: 執筆形式=${st.writerFormatRetries ?? st.writerRetries}, 空応答=${st.emptyResponseRetries ?? 0}, 記録形式=${st.recordFormatRetries ?? st.recordRetries}, API一時障害=${st.transientApiRetries}${(st.lengthTruncatedAttempts ?? 0) > 0 ? `, length打切=${st.lengthTruncatedAttempts}` : ""}）`
     : null
   const incompleteSummary = Object.entries(meta.incompleteRuns ?? {})
     .flatMap(([ex, items]) => items.map((it) => `${ex}#run-${it.run}(${it.reason})`))
@@ -201,7 +201,7 @@ function formatRunSummaryMarkdown(meta, summary) {
   ]
   if ((st?.lengthTruncatedAttempts ?? 0) > 0) {
     lines.push(
-      `- **⚠️ 出力上限打切り**: \`finish_reason=length\` による空応答が ${st.lengthTruncatedAttempts} 回発生しました。\`--writer-max-tokens\` や \`--writer-extra-body\` で推論量・出力上限の設定を見直してください。`,
+      `- **⚠️ 出力上限打切り**: \`finish_reason=length\` による打切りが ${st.lengthTruncatedAttempts} 回発生しました。\`--writer-max-tokens\` や \`--writer-extra-body\` で推論量・出力上限の設定を見直してください。`,
     )
   }
   if (meta.stoppedByBudget) {
@@ -216,7 +216,7 @@ function formatRunSummaryMarkdown(meta, summary) {
   lines.push(
     "",
     "## 機械指標サマリー（外部中断を除いた試行を集計）",
-    "| 作品 | 試行 | 欠落話数 | 表記❌合計 | 文章⚠️密度(/1k字) | stock-phrase(/1k字) | 書けた話ズレ平均 | 文字数逸脱(参考) | 記録⚠️合計 | 文体絶対値ズレ(1文平均/会話比) |",
+    "| 作品 | 試行 | 欠落話数 | 表記❌合計 | 文章⚠️密度(/1k字) | 定型句16規則/外5規則(生件数) | 書けた話ズレ平均 | 文字数逸脱(参考) | 記録⚠️合計 | 文体絶対値ズレ(1文平均/会話比) |",
     "|---|---:|---:|---:|---:|---:|---:|---:|---:|---|",
   )
   const formatStyleCell = (drift) => {
@@ -231,15 +231,15 @@ function formatRunSummaryMarkdown(meta, summary) {
       : "n/a"
   for (const [ex, data] of Object.entries(summary.byExample)) {
     const agg = data.aggregate
-    const stock = agg.proseByRulePer1kCharsAvg?.["stock-phrase"] ?? 0
+    const stockCell = `${agg.stockPhraseSkillTotal ?? 0}件 / ${agg.stockPhraseOtherTotal ?? 0}件 (計${agg.stockPhraseRawTotal ?? 0}件)`
     lines.push(
-      `| ${ex} | ${agg.runCount}/${meta.runs} | ${agg.missingChaptersTotal ?? 0} | ${agg.typographyErrorsTotal} | ${agg.proseWarningsPer1kCharsAvg.toFixed(3)} | ${stock.toFixed(3)} | ${fmtWrittenDev(agg)} | ${agg.outOfRangeChaptersTotal} | ${agg.statusWarningsTotal} | ${formatStyleCell(agg.styleDriftAvg)} |`,
+      `| ${ex} | ${agg.runCount}/${meta.runs} | ${agg.missingChaptersTotal ?? 0} | ${agg.typographyErrorsTotal} | ${agg.proseWarningsPer1kCharsAvg.toFixed(3)} | ${stockCell} | ${fmtWrittenDev(agg)} | ${agg.outOfRangeChaptersTotal} | ${agg.statusWarningsTotal} | ${formatStyleCell(agg.styleDriftAvg)} |`,
     )
   }
   const ov = summary.overall
-  const ovStock = ov.proseByRulePer1kCharsAvg?.["stock-phrase"] ?? 0
+  const ovStockCell = `${ov.stockPhraseSkillTotal ?? 0}件 / ${ov.stockPhraseOtherTotal ?? 0}件 (計${ov.stockPhraseRawTotal ?? 0}件)`
   lines.push(
-    `| **全体** | **${ov.runCount}** | **${ov.missingChaptersTotal ?? 0}** | **${ov.typographyErrorsTotal}** | **${ov.proseWarningsPer1kCharsAvg.toFixed(3)}** | **${ovStock.toFixed(3)}** | **${fmtWrittenDev(ov)}** | **${ov.outOfRangeChaptersTotal}** | **${ov.statusWarningsTotal}** | **${formatStyleCell(ov.styleDriftAvg)}** |`,
+    `| **全体** | **${ov.runCount}** | **${ov.missingChaptersTotal ?? 0}** | **${ov.typographyErrorsTotal}** | **${ov.proseWarningsPer1kCharsAvg.toFixed(3)}** | **${ovStockCell}** | **${fmtWrittenDev(ov)}** | **${ov.outOfRangeChaptersTotal}** | **${ov.statusWarningsTotal}** | **${formatStyleCell(ov.styleDriftAvg)}** |`,
     "",
   )
   return lines.join("\n")
@@ -318,6 +318,7 @@ export async function runCommand(flags, deps = {}) {
     writerFormatRetries: 0,
     emptyResponseRetries: 0,
     recordRetries: 0,
+    recordFormatRetries: 0,
     lengthTruncatedAttempts: 0,
     transientApiRetries: 0,
     failedApiCalls: 0,
@@ -377,6 +378,7 @@ export async function runCommand(flags, deps = {}) {
           executionStats.writerFormatRetries += step.writerFormatRetries ?? 0
           executionStats.emptyResponseRetries += (step.emptyResponseRetries ?? 0) + (step.recordEmptyResponseRetries ?? 0)
           executionStats.recordRetries += step.recordRetries ?? 0
+          executionStats.recordFormatRetries += step.recordFormatRetries ?? 0
           executionStats.lengthTruncatedAttempts += step.lengthTruncatedAttempts ?? 0
           if (step.systemPromptHash && !systemPromptHashes[ex]) {
             systemPromptHashes[ex] = step.systemPromptHash

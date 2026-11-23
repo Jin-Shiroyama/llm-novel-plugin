@@ -11,6 +11,10 @@ export const EVAL_AXES = ["buildup_and_payoff", "tone_and_ng", "character_voice"
 
 /** 書けた話の文字数ズレ（絶対値平均）の許容悪化幅（ポイント未満。+8.0pt 以上悪化で不合格） */
 export const WORD_DEVIATION_REGRESSION_TOLERANCE_PT = 8.0
+/** 定型句（SKILL対象16規則）の生使用件数差の悪化閾値（--runs 3 / 18 話どうしの比較基準） */
+export const STOCK_PHRASE_SKILL_DIFF_THRESHOLD = 7
+/** 定型句閾値の前提となる片側話数（2 作品 × 3 話 × 3 試行 = 18 話） */
+export const STOCK_PHRASE_CALIBRATED_CHAPTERS = 18
 
 export const AXIS_LABELS = {
   buildup_and_payoff: "溜めと見返り（平坦化チェック）",
@@ -590,16 +594,20 @@ export function evaluateDecision({
       )
     }
 
-    // 禁止表現リスト削減の影響が長い文などのノイズに埋もれないよう、stock-phrase 密度も個別監視する
-    const stockA = overallMetricsA.proseByRulePer1kCharsAvg?.["stock-phrase"]
-    const stockB = overallMetricsB.proseByRulePer1kCharsAvg?.["stock-phrase"]
+    // 定型句（SKILL.md 削除対象 16 規則）の地の文生使用件数を文字量でそろえて判定する
+    // （従来の超過 ⚠️・対象外 5 規則・全 21 規則計は偽陽性の足し上げを防ぐため表示専用）
+    const skillA = overallMetricsA.stockPhraseSkillTotal
+    const skillB = overallMetricsB.stockPhraseSkillTotal
     let stockRegressed = false
-    if (Number.isFinite(stockA) && Number.isFinite(stockB)) {
-      const allowedStock = Math.max(stockA * 1.2, stockA + 0.2)
-      if (stockB > allowedStock) {
+    if (Number.isFinite(skillA) && Number.isFinite(skillB)) {
+      const charsA = overallMetricsA.totalBodyChars ?? 0
+      const charsB = overallMetricsB.totalBodyChars ?? 0
+      const expectedB = charsA > 0 && charsB > 0 ? skillA * (charsB / charsA) : skillA
+      const adjustedDiff = skillB - expectedB
+      if (adjustedDiff >= STOCK_PHRASE_SKILL_DIFF_THRESHOLD) {
         stockRegressed = true
         reasons.push(
-          `できあいの言い回し（stock-phrase）⚠️ 密度が許容上限を超過（A: ${stockA.toFixed(3)} → B: ${stockB.toFixed(3)} / 上限 ${allowedStock.toFixed(3)} 件/1,000字）`,
+          `定型句（SKILL対象16規則）の生使用件数が悪化（A: ${skillA}件 → B: ${skillB}件 / 文字量補正差 +${adjustedDiff.toFixed(1)}件、基準 +${STOCK_PHRASE_SKILL_DIFF_THRESHOLD}件以上で不合格）`,
         )
       }
     }
@@ -626,7 +634,7 @@ export function evaluateDecision({
       return { verdict: "HOLD_NO_DIFF", criteria, primaryAxis, reasons }
     }
     reasons.push(
-      `機械指標・文章 ⚠️ 密度（全体・stock-phrase）の悪化がなく、tone_and_ng・overall のいずれも A 側 75%（${requiredWinsForReject}勝/${pairSummary.totalPairs}ペア）以上の却下基準に該当しない（非劣性基準を満たす）`,
+      `機械指標・文章 ⚠️ 密度・定型句（SKILL対象16規則）の悪化がなく、tone_and_ng・overall のいずれも A 側 75%（${requiredWinsForReject}勝/${pairSummary.totalPairs}ペア）以上の却下基準に該当しない（非劣性基準を満たす）`,
     )
     return { verdict: "ADOPT_CANDIDATE", criteria, primaryAxis, reasons }
   }
@@ -678,7 +686,7 @@ function formatRunMetaLine(tag, meta) {
     ? ` / dist=${meta.artifacts.distHash?.slice(0, 12) ?? "n/a"} / skills=${meta.artifacts.skillsHash?.slice(0, 12) ?? "n/a"}`
     : ""
   const st = meta.executionStats
-    ? ` / 話内訳(ok=${stStr(meta.executionStats.okChapters)}, partial=${stStr(meta.executionStats.partialRecordErrorChapters)}, fail=${stStr(meta.executionStats.failedChapters)}, retry[fmt=${stStr(meta.executionStats.writerFormatRetries ?? meta.executionStats.writerRetries)},empty=${stStr(meta.executionStats.emptyResponseRetries)},r=${stStr(meta.executionStats.recordRetries)},api=${stStr(meta.executionStats.transientApiRetries)}])`
+    ? ` / 話内訳(ok=${stStr(meta.executionStats.okChapters)}, partial=${stStr(meta.executionStats.partialRecordErrorChapters)}, fail=${stStr(meta.executionStats.failedChapters)}, retry[fmt=${stStr(meta.executionStats.writerFormatRetries ?? meta.executionStats.writerRetries)},empty=${stStr(meta.executionStats.emptyResponseRetries)},r=${stStr(meta.executionStats.recordFormatRetries ?? meta.executionStats.recordRetries)},api=${stStr(meta.executionStats.transientApiRetries)}])`
     : ""
   return `- **${tag} (${meta.label})**: commit=${meta.git?.shortCommit ?? "unknown"}${meta.git?.dirty ? " (dirty)" : ""}${fp} / skillVariant=${meta.skillVariant} / writer=${meta.writerModel} (応答: ${(meta.budget?.responseModels ?? []).join(", ") || "n/a"}) / runs=${meta.runs}${st}`
 }
@@ -742,8 +750,31 @@ export function formatComparisonMarkdown({
   const proseRuleRows = PROSE_METRIC_RULES.map((rule) => {
     const aVal = overallMetricsA.proseByRulePer1kCharsAvg?.[rule] ?? 0
     const bVal = overallMetricsB.proseByRulePer1kCharsAvg?.[rule] ?? 0
-    return `| 　└ ${PROSE_RULE_LABELS[rule] ?? rule} | ${aVal.toFixed(3)} | ${bVal.toFixed(3)} |`
+    const aCnt = overallMetricsA.proseByRuleTotal?.[rule]
+    const bCnt = overallMetricsB.proseByRuleTotal?.[rule]
+    const aCell = Number.isFinite(aCnt) ? `${aVal.toFixed(3)} (${aCnt}件)` : aVal.toFixed(3)
+    const bCell = Number.isFinite(bCnt) ? `${bVal.toFixed(3)} (${bCnt}件)` : bVal.toFixed(3)
+    return `| 　└ ${PROSE_RULE_LABELS[rule] ?? rule} | ${aCell} | ${bCell} |`
   })
+
+  const skillA = overallMetricsA.stockPhraseSkillTotal
+  const skillB = overallMetricsB.stockPhraseSkillTotal
+  const hasStockRaw = Number.isFinite(skillA) && Number.isFinite(skillB)
+  const stockRawRows = (() => {
+    if (!hasStockRaw) return []
+    const charsA = overallMetricsA.totalBodyChars ?? 0
+    const charsB = overallMetricsB.totalBodyChars ?? 0
+    const expectedB = charsA > 0 && charsB > 0 ? skillA * (charsB / charsA) : skillA
+    const adjustedDiff = skillB - expectedB
+    const otherA = overallMetricsA.stockPhraseOtherTotal ?? 0
+    const otherB = overallMetricsB.stockPhraseOtherTotal ?? 0
+    const rawA = overallMetricsA.stockPhraseRawTotal ?? skillA + otherA
+    const rawB = overallMetricsB.stockPhraseRawTotal ?? skillB + otherB
+    return [
+      `| 定型句 生件数：SKILL対象16規則（simplify判定対象・補正差+${STOCK_PHRASE_SKILL_DIFF_THRESHOLD}件以上で不合格） | ${skillA}件 | ${skillB}件 (補正差 ${fmtSigned(adjustedDiff, 1, "件")}) |`,
+      `| 定型句 生件数：対象外5規則 / 全21規則（参考表示） | ${otherA}件 / ${rawA}件 | ${otherB}件 / ${rawB}件 |`,
+    ]
+  })()
 
   const dA = overallMetricsA.styleDriftAvg
   const dB = overallMetricsB.styleDriftAvg
@@ -788,6 +819,7 @@ export function formatComparisonMarkdown({
     `| 欠落話数合計（執筆・保存失敗） | ${overallMetricsA.missingChaptersTotal ?? 0} | ${overallMetricsB.missingChaptersTotal ?? 0} |`,
     `| 文章 ⚠️ 密度（件/1,000字・合計平均） | ${overallMetricsA.proseWarningsPer1kCharsAvg.toFixed(3)} | ${overallMetricsB.proseWarningsPer1kCharsAvg.toFixed(3)} |`,
     ...proseRuleRows,
+    ...stockRawRows,
     `| 書けた話の文字数ズレ絶対値平均（%・判定対象、+${WORD_DEVIATION_REGRESSION_TOLERANCE_PT}pt未満許容） | ${fmtPctOrNa(wordDevWrittenA)} | ${fmtPctOrNa(wordDevWrittenB)} |`,
     `| 全話の文字数ズレ絶対値平均（%・欠落=100%含む参考） | ${overallMetricsA.meanAbsWordDeviationPctAvg.toFixed(1)}% | ${overallMetricsB.meanAbsWordDeviationPctAvg.toFixed(1)}% |`,
     `| 文字数目安 ±15% 逸脱話数合計（参考表示） | ${overallMetricsA.outOfRangeChaptersTotal} | ${overallMetricsB.outOfRangeChaptersTotal} |`,
@@ -795,9 +827,37 @@ export function formatComparisonMarkdown({
     ...styleRows,
   )
 
-  // 作品別の文体見本ズレ（作品間で符号が逆の過去形比率などが打ち消し合わないよう個別表示）
+  const writtenA = overallMetricsA.writtenChaptersTotal
+  const writtenB = overallMetricsB.writtenChaptersTotal
+  if (
+    decision.criteria === "simplify" &&
+    hasStockRaw &&
+    Number.isFinite(writtenA) &&
+    Number.isFinite(writtenB) &&
+    (writtenA !== STOCK_PHRASE_CALIBRATED_CHAPTERS || writtenB !== STOCK_PHRASE_CALIBRATED_CHAPTERS)
+  ) {
+    lines.push(
+      "",
+      `> ⚠️ 定型句（SKILL対象16規則）の悪化閾値（+${STOCK_PHRASE_SKILL_DIFF_THRESHOLD}件）は ${STOCK_PHRASE_CALIBRATED_CHAPTERS} 話どうしの比較用です（今回: A=${writtenA}話 / B=${writtenB}話）。`,
+    )
+  }
+
+  // 作品別の定型句生件数・文体見本ズレ（作品間で符号や母数が異なるため個別表示）
   if (byExampleMetricsA && byExampleMetricsB) {
     const exNames = Object.keys(byExampleMetricsA).filter((ex) => byExampleMetricsB[ex])
+    const exStockRows = []
+    for (const ex of exNames) {
+      const mA = byExampleMetricsA[ex]
+      const mB = byExampleMetricsB[ex]
+      if (!Number.isFinite(mA?.stockPhraseSkillTotal) || !Number.isFinite(mB?.stockPhraseSkillTotal)) continue
+      exStockRows.push(
+        `| ${ex} | SKILL対象 ${mA.stockPhraseSkillTotal}件 / 対象外 ${mA.stockPhraseOtherTotal ?? 0}件 / 計 ${mA.stockPhraseRawTotal ?? 0}件 | SKILL対象 ${mB.stockPhraseSkillTotal}件 / 対象外 ${mB.stockPhraseOtherTotal ?? 0}件 / 計 ${mB.stockPhraseRawTotal ?? 0}件 |`,
+      )
+    }
+    if (exStockRows.length > 0) {
+      lines.push("", "### 作品別の定型句生件数（参考表示・件数）", "| 作品 | A | B |", "|---|---:|---:|", ...exStockRows)
+    }
+
     const exStyleRows = []
     for (const ex of exNames) {
       const sA = byExampleMetricsA[ex]?.styleDriftAvg

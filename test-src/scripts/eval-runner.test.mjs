@@ -27,11 +27,13 @@ import {
   parseRecordUpdateJson,
   parseWriterOutput,
 } from "../../scripts/eval/writer-harness.mjs"
-import { aggregateRunsMetrics } from "../../scripts/eval/metrics.mjs"
+import { aggregateRunsMetrics, SKILL_BAN_LIST_STOCK_PHRASES } from "../../scripts/eval/metrics.mjs"
+import { STOCK_PHRASE_RULES } from "../../dist/core/prose.js"
 import {
   checkRunCompatibility,
   computeFalsePositiveRate,
   evaluateDecision,
+  formatComparisonMarkdown,
   judgePairSwapped,
   resolveSwappedVote,
   summarizePairJudgments,
@@ -636,17 +638,48 @@ describe("評価ランナー: judge（位置スワップ・確定率 d・偽陽�
       }).verdict,
       "REJECT_REGRESSION",
     )
-    // 全体密度が許容内でも stock-phrase 密度が上限超過（0.2 -> 0.5 > max(0.24, 0.4)）なら REJECT_REGRESSION
+    // 定型句（SKILL対象16規則）の生使用件数差：同文字量で +6件は許容、+7件以上で REJECT_REGRESSION
     assert.equal(
       evaluateDecision({
         criteria: "simplify",
         pairSummary: allTie,
-        overallMetricsA: cleanMetrics,
+        overallMetricsA: { ...cleanMetrics, totalBodyChars: 44000, stockPhraseSkillTotal: 8 },
         overallMetricsB: {
           ...cleanMetrics,
-          proseWarningsPer1kCharsAvg: 1.1,
-          proseByRulePer1kCharsAvg: { "stock-phrase": 0.5 },
+          totalBodyChars: 44000,
+          stockPhraseSkillTotal: 14, // 差 +6.0 < 7
+          stockPhraseOtherTotal: 30, // 対象外5規則は表示専用
+          proseByRulePer1kCharsAvg: { "stock-phrase": 0.9 }, // 超過 ⚠️ も表示専用
         },
+      }).verdict,
+      "ADOPT_CANDIDATE",
+    )
+    assert.equal(
+      evaluateDecision({
+        criteria: "simplify",
+        pairSummary: allTie,
+        overallMetricsA: { ...cleanMetrics, totalBodyChars: 44000, stockPhraseSkillTotal: 8 },
+        overallMetricsB: { ...cleanMetrics, totalBodyChars: 44000, stockPhraseSkillTotal: 15 }, // 差 +7.0 >= 7
+      }).verdict,
+      "REJECT_REGRESSION",
+    )
+    // 文字量補正：B の文字数が 1.5 倍なら期待件数も 1.5 倍（10 * 1.5 = 15）なので 18件（補正差 +3.0件）は許容
+    assert.equal(
+      evaluateDecision({
+        criteria: "simplify",
+        pairSummary: allTie,
+        overallMetricsA: { ...cleanMetrics, totalBodyChars: 20000, stockPhraseSkillTotal: 10 },
+        overallMetricsB: { ...cleanMetrics, totalBodyChars: 30000, stockPhraseSkillTotal: 18 },
+      }).verdict,
+      "ADOPT_CANDIDATE",
+    )
+    // 逆に B の文字数が半分なら期待件数も半分（10 * 0.5 = 5）なので 12件（補正差 +7.0件）は REJECT_REGRESSION
+    assert.equal(
+      evaluateDecision({
+        criteria: "simplify",
+        pairSummary: allTie,
+        overallMetricsA: { ...cleanMetrics, totalBodyChars: 40000, stockPhraseSkillTotal: 10 },
+        overallMetricsB: { ...cleanMetrics, totalBodyChars: 20000, stockPhraseSkillTotal: 12 },
       }).verdict,
       "REJECT_REGRESSION",
     )
@@ -1273,6 +1306,171 @@ describe("評価ランナー: CLI エンドツーエンド --dry-run（run / met
       )
     } finally {
       rmSync(outRoot, { recursive: true, force: true })
+    }
+  })
+
+  test("SKILL_BAN_LIST_STOCK_PHRASES（16語）は prose.ts と SKILL.md「A. 避ける定型句」の本文に完全一致し、非18話比較では注意文が出る", () => {
+    const proseNames = new Set(STOCK_PHRASE_RULES.map((r) => r.phrase))
+    assert.equal(SKILL_BAN_LIST_STOCK_PHRASES.length, 16)
+    for (const name of SKILL_BAN_LIST_STOCK_PHRASES) {
+      assert.ok(proseNames.has(name), `SKILL_BAN_LIST_STOCK_PHRASES の「${name}」が prose.ts に存在すること`)
+    }
+
+    const skillMd = readFileSync(join(root, "skills", "novel-writing", "SKILL.md"), "utf-8")
+    const secStart = skillMd.indexOf("### A.")
+    const secEnd = skillMd.indexOf("### B.")
+    assert.ok(secStart >= 0 && secEnd > secStart)
+    const sectionA = skillMd.slice(secStart, secEnd)
+
+    const matchedInSectionA = new Set()
+    for (const rule of STOCK_PHRASE_RULES) {
+      // source / flags から都度 RegExp を作り matchAll を使う（lastIndex 汚染なし）
+      const re = new RegExp(rule.source, rule.flags)
+      if ([...sectionA.matchAll(re)].length > 0) {
+        matchedInSectionA.add(rule.phrase)
+      }
+    }
+    assert.deepEqual(
+      [...matchedInSectionA].sort(),
+      [...SKILL_BAN_LIST_STOCK_PHRASES].sort(),
+      "SKILL.md「A. 避ける定型句」に一致する規則集合が SKILL_BAN_LIST_STOCK_PHRASES と完全一致すること",
+    )
+
+    // 書けた話が 18 話でないとき、formatComparisonMarkdown に 18 話用閾値の注意文が出ること
+    const baseMetrics = {
+      totalBodyChars: 29000,
+      writtenChaptersTotal: 12,
+      typographyErrorsTotal: 0,
+      missingChaptersTotal: 0,
+      statusWarningsTotal: 0,
+      outOfRangeChaptersTotal: 7,
+      meanAbsWordDeviationPctAvg: 19.0,
+      meanAbsWordDeviationPctWrittenAvg: 19.0,
+      proseWarningsPer1kCharsAvg: 0.07,
+      proseByRulePer1kCharsAvg: { "stock-phrase": 0.03 },
+      proseByRuleTotal: { "stock-phrase": 1 },
+      stockPhraseSkillTotal: 6,
+      stockPhraseOtherTotal: 3,
+      stockPhraseRawTotal: 9,
+      styleDriftAvg: null,
+    }
+    const md12 = formatComparisonMarkdown({
+      metaA: { label: "a", skillVariant: "default", writerModel: "m", runs: 2 },
+      metaB: { label: "b", skillVariant: "default", writerModel: "m", runs: 2 },
+      compatibility: { warnings: [], notes: [], comparisonType: "aa_test" },
+      overallMetricsA: baseMetrics,
+      overallMetricsB: { ...baseMetrics, stockPhraseSkillTotal: 7 },
+      pairSummary: summarizePairJudgments([]),
+      decision: { verdict: "ADOPT_CANDIDATE", criteria: "simplify", primaryAxis: "buildup_and_payoff", reasons: ["ok"] },
+      pairResults: [],
+      judgeBudget: { calls: 0, totalTokens: 0, estimatedCostUsd: null, responseModels: [] },
+    })
+    assert.ok(md12.includes("18 話どうしの比較用です（今回: A=12話 / B=12話）"))
+  })
+
+  test("非空の finish_reason=length 途中切れ・混在失敗・記録更新空応答の二重計上防止", async () => {
+    const plugin = await loadPluginFromRoot(root, { allowStaleDist: true })
+    const workDir1 = makeTempDir("eval-length-trunc-")
+    const workDir2 = makeTempDir("eval-mixed-fail-")
+    const workDir3 = makeTempDir("eval-record-empty-")
+    try {
+      const { cpSync } = await import("node:fs")
+      const srcEx = join(root, "examples", "romcom-light")
+      cpSync(srcEx, workDir1, { recursive: true })
+      cpSync(srcEx, workDir2, { recursive: true })
+      cpSync(srcEx, workDir3, { recursive: true })
+
+      // 1. 非空の finish_reason=length 途中切れ：lengthTruncatedAttempts に計上され、再試行で切れた出力を履歴に積まない
+      const seenMessages1 = []
+      const dryRomcom = createDryRunLlmClient({ exampleName: "romcom-light" })
+      let w1Call = 0
+      const step1 = await executeChapterStep({
+        plugin,
+        projectDir: workDir1,
+        chapterNumber: 1,
+        llmConfig: { baseUrl: "http://mock", apiKey: "k", model: "m" },
+        budget: new BudgetTracker({ maxCalls: 10 }),
+        callLlm: async (args) => {
+          if (args.label.startsWith("write-")) {
+            w1Call++
+            seenMessages1.push(args.messages.map((m) => ({ role: m.role, len: m.content.length })))
+            if (w1Call === 1) {
+              return {
+                content: "<タイトル>途中の話</タイトル>\n<本文>\n途中で切れた長い本文",
+                model: "m",
+                finishReason: "length",
+                usage: { promptTokens: 100, completionTokens: 4000, totalTokens: 4100 },
+              }
+            }
+          }
+          return dryRomcom(args)
+        },
+      })
+      assert.equal(step1.status, "ok")
+      assert.equal(step1.lengthTruncatedAttempts, 1, "非空の finish_reason=length も打切り回数に計上されること")
+      assert.equal(step1.writerAttempts[0].failureType, "length_truncated")
+      assert.equal(seenMessages1[1].length, 2, "途中切れ再試行では切れた assistant 出力を履歴に積まないこと")
+
+      // 2. 1回目 format_error + 2回目 empty_response の混在失敗：誤って「空応答で2回失敗」と言わないこと
+      let w2Call = 0
+      const step2 = await executeChapterStep({
+        plugin,
+        projectDir: workDir2,
+        chapterNumber: 1,
+        llmConfig: { baseUrl: "http://mock", apiKey: "k", model: "m" },
+        budget: new BudgetTracker({ maxCalls: 10 }),
+        callLlm: async (args) => {
+          w2Call++
+          if (w2Call === 1) {
+            return {
+              content: "タグのない形式エラー出力",
+              model: "m",
+              finishReason: "stop",
+              usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 },
+            }
+          }
+          return {
+            content: "",
+            model: "m",
+            finishReason: "stop",
+            usage: { promptTokens: 100, completionTokens: 0, totalTokens: 100 },
+          }
+        },
+      })
+      assert.equal(step2.status, "failed")
+      assert.ok(!step2.error.includes("空応答で2回失敗"), "混在失敗を『空応答で2回失敗』と誤記しないこと")
+      assert.ok(step2.error.includes("format_error") && step2.error.includes("empty_response"))
+
+      // 3. 記録更新の空応答再試行は recordEmptyResponseRetries に入り、recordFormatRetries へは入らないこと
+      let u3Call = 0
+      const step3 = await executeChapterStep({
+        plugin,
+        projectDir: workDir3,
+        chapterNumber: 1,
+        llmConfig: { baseUrl: "http://mock", apiKey: "k", model: "m" },
+        budget: new BudgetTracker({ maxCalls: 10 }),
+        callLlm: async (args) => {
+          if (args.label.startsWith("update-")) {
+            u3Call++
+            if (u3Call === 1) {
+              return {
+                content: "",
+                model: "m",
+                finishReason: "stop",
+                usage: { promptTokens: 100, completionTokens: 0, totalTokens: 100 },
+              }
+            }
+          }
+          return dryRomcom(args)
+        },
+      })
+      assert.equal(step3.status, "ok")
+      assert.equal(step3.recordEmptyResponseRetries, 1)
+      assert.equal(step3.recordFormatRetries, 0, "記録更新の空応答再試行が recordFormatRetries に二重計上されないこと")
+    } finally {
+      rmSync(workDir1, { recursive: true, force: true })
+      rmSync(workDir2, { recursive: true, force: true })
+      rmSync(workDir3, { recursive: true, force: true })
     }
   })
 })

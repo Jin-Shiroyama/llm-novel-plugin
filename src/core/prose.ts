@@ -264,6 +264,28 @@ const PHRASES: PhraseRule[] = [
   },
 ]
 
+const STOCK_PHRASE_ENTRIES: readonly PhraseRule[] = PHRASES.filter((r) => r.rule === "stock-phrase")
+
+export interface StockPhraseRuleSpec {
+  readonly phrase: string
+  readonly source: string
+  readonly flags: string
+}
+
+export interface StockPhraseUsage {
+  /** prose.ts の stock-phrase 全 21 規則の地の文生出現回数合計（許容回数を無視） */
+  total: number
+  /** 語（rule.phrase）ごとの生出現回数（1 件以上のみ） */
+  byPhrase: Record<string, number>
+}
+
+/** stock-phrase 全 21 規則の定義（g フラグの lastIndex 汚染を避けるため source / flags で公開） */
+export const STOCK_PHRASE_RULES: ReadonlyArray<StockPhraseRuleSpec> = Object.freeze(
+  STOCK_PHRASE_ENTRIES.map((r) =>
+    Object.freeze({ phrase: r.phrase, source: r.pattern.source, flags: r.pattern.flags }),
+  ),
+)
+
 /** 話末の末尾数行（地の文）だけで見る定型締め */
 const CLOSING_CLICHES: PhraseRule[] = [
   {
@@ -337,6 +359,33 @@ function tailLineIndexSet(lines: string[]): Set<number> {
   return new Set(indices)
 }
 
+function maskDialogueInNarration(chars: string[], inDialogue: boolean[]): string {
+  return chars.map((ch, k) => (inDialogue[k] ? "\u0000" : ch)).join("")
+}
+
+/** 地の文における定型句（stock-phrase 21 規則）の許容前ヒット数を数える */
+export function countStockPhraseUsage(text: string): StockPhraseUsage {
+  const byPhrase: Record<string, number> = {}
+  let total = 0
+  const lines = text.replace(/\r\n/g, "\n").split("\n")
+  for (const line of lines) {
+    if (line.trim().length === 0) continue
+    const analysis = analyzeManuscriptLine(line)
+    if (analysis.kind !== "narration") continue
+    const { inDialogue } = splitSentences(analysis.chars)
+    const narration = maskDialogueInNarration(analysis.chars, inDialogue)
+    for (const rule of STOCK_PHRASE_ENTRIES) {
+      let count = 0
+      for (const _ of narration.matchAll(rule.pattern)) count++
+      if (count > 0) {
+        total += count
+        byPhrase[rule.phrase] = (byPhrase[rule.phrase] ?? 0) + count
+      }
+    }
+  }
+  return { total, byPhrase }
+}
+
 /** 本文の文章を点検する */
 export function checkProse(text: string, opts: CheckProseOptions = {}): ProseIssue[] {
   const issues: ProseIssue[] = []
@@ -371,7 +420,7 @@ export function checkProse(text: string, opts: CheckProseOptions = {}): ProseIss
     }
     const { sentences, inDialogue } = splitSentences(chars)
 
-    const narration = chars.map((ch, k) => (inDialogue[k] ? "\u0000" : ch)).join("")
+    const narration = maskDialogueInNarration(chars, inDialogue)
     const toIndex = (offset: number) => [...narration.slice(0, offset)].length
     for (const rule of PHRASES) {
       for (const m of narration.matchAll(rule.pattern)) {

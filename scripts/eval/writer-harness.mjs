@@ -199,6 +199,26 @@ function buildEmptyResponseReason(finishReason, roleFlagPrefix = "writer") {
   return `空応答が返されました（content が空 / finish_reason=${finishReason ?? "unknown"}）`
 }
 
+function buildWriterDoubleFailureMessage(writerAttempts, lastReason) {
+  const t1 = writerAttempts[0]?.failureType ?? "unknown"
+  const t2 = writerAttempts[1]?.failureType ?? "unknown"
+  if (t1 === "empty_response" && t2 === "empty_response") {
+    return `本文生成が空応答で2回失敗しました: ${lastReason}`
+  }
+  if (t1 === "length_truncated" && t2 === "length_truncated") {
+    return `本文生成が出力上限（finish_reason=length）で2回失敗しました: ${lastReason}`
+  }
+  if (t1 === "format_error" && t2 === "format_error") {
+    return `本文の抽出・検証に2回失敗しました: ${lastReason}`
+  }
+  return `本文生成に2回失敗しました（1回目: ${t1} / 2回目: ${t2}）: ${lastReason}`
+}
+
+function buildLengthTruncatedNote(stage, chapterNumber, attempt, isEmpty) {
+  const kind = isEmpty ? "空応答" : "途中切れ出力"
+  return `[eval ${stage}] ⚠️ 第${chapterNumber}話 attempt${attempt}: finish_reason=length による${kind}が発生しました（--writer-max-tokens や --writer-extra-body の設定を見直してください）`
+}
+
 /** 1 話の執筆 → 保存 → 記録更新（character-state / summary / foreshadow）を実行する */
 export async function executeChapterStep({
   plugin,
@@ -246,12 +266,13 @@ export async function executeChapterStep({
     })
     lastWriterRaw = String(res.content ?? "")
     const isEmpty = lastWriterRaw.trim().length === 0
+    const isLengthTruncated = res.finishReason === "length"
+    if (isLengthTruncated) {
+      lengthTruncatedAttempts++
+      console.error(buildLengthTruncatedNote("write", chapterNumber, attempt, isEmpty))
+    }
     if (isEmpty) {
       const reason = buildEmptyResponseReason(res.finishReason ?? null, "writer")
-      if (res.finishReason === "length") {
-        lengthTruncatedAttempts++
-        console.error(`[eval write] ⚠️ 第${chapterNumber}話 attempt${attempt}: ${reason}`)
-      }
       writerAttempts.push(summarizeLlmAttempt(attempt, res, "empty_response", reason))
       if (attempt === 1) {
         writerRetries = 1
@@ -272,7 +293,7 @@ export async function executeChapterStep({
         emptyResponseRetries,
         lengthTruncatedAttempts,
         writerAttempts,
-        error: `本文生成が空応答で2回失敗しました: ${reason}`,
+        error: buildWriterDoubleFailureMessage(writerAttempts, reason),
         lastRawSample: "",
       }
     }
@@ -283,10 +304,15 @@ export async function executeChapterStep({
       parsedWriter = parsed
       break
     }
-    writerAttempts.push(summarizeLlmAttempt(attempt, res, "format_error", parsed.reason))
+    const failType = isLengthTruncated ? "length_truncated" : "format_error"
+    writerAttempts.push(summarizeLlmAttempt(attempt, res, failType, parsed.reason))
     if (attempt === 1) {
       writerRetries = 1
       writerFormatRetries = 1
+      if (isLengthTruncated) {
+        // 出力上限で途中切れした長い出力を履歴に積むと再試行も打切られやすいため、元プロンプトのまま送り直す
+        continue
+      }
       writerMessages.push(
         { role: "assistant", content: lastWriterRaw },
         {
@@ -298,7 +324,7 @@ export async function executeChapterStep({
       return {
         status: "failed",
         stage: "write",
-        failureType: "format_error",
+        failureType: failType,
         finishReason: res.finishReason ?? null,
         chapterNumber,
         systemPromptHash,
@@ -308,7 +334,7 @@ export async function executeChapterStep({
         emptyResponseRetries,
         lengthTruncatedAttempts,
         writerAttempts,
-        error: `本文の抽出・検証に2回失敗しました: ${parsed.reason}`,
+        error: buildWriterDoubleFailureMessage(writerAttempts, parsed.reason),
         lastRawSample: lastWriterRaw.slice(0, 300),
       }
     }
@@ -351,6 +377,7 @@ export async function executeChapterStep({
   })
 
   let recordRetries = 0
+  let recordFormatRetries = 0
   let recordEmptyResponseRetries = 0
   let recordErrors = []
   const recordAttempts = []
@@ -367,12 +394,14 @@ export async function executeChapterStep({
     })
 
     const rawRecord = String(res.content ?? "")
-    if (rawRecord.trim().length === 0) {
+    const isEmpty = rawRecord.trim().length === 0
+    const isLengthTruncated = res.finishReason === "length"
+    if (isLengthTruncated) {
+      lengthTruncatedAttempts++
+      console.error(buildLengthTruncatedNote("update", chapterNumber, attempt, isEmpty))
+    }
+    if (isEmpty) {
       const reason = buildEmptyResponseReason(res.finishReason ?? null, "writer")
-      if (res.finishReason === "length") {
-        lengthTruncatedAttempts++
-        console.error(`[eval update] ⚠️ 第${chapterNumber}話 attempt${attempt}: ${reason}`)
-      }
       recordErrors = [reason]
       recordAttempts.push(summarizeLlmAttempt(attempt, res, "empty_response", reason))
       if (attempt === 1) {
@@ -427,7 +456,7 @@ export async function executeChapterStep({
       summarizeLlmAttempt(
         attempt,
         res,
-        recordErrors.length > 0 ? "format_or_update_error" : null,
+        recordErrors.length > 0 ? (isLengthTruncated ? "length_truncated" : "format_or_update_error") : null,
         recordErrors.length > 0 ? recordErrors.join(" / ") : null,
       ),
     )
@@ -435,6 +464,11 @@ export async function executeChapterStep({
     if (recordErrors.length === 0) break
     if (attempt === 1) {
       recordRetries = 1
+      recordFormatRetries = 1
+      if (isLengthTruncated) {
+        // 出力上限で途中切れした長い JSON を履歴に積まず、元プロンプトのまま送り直す
+        continue
+      }
       recordMessages.push(
         { role: "assistant", content: rawRecord },
         {
@@ -455,6 +489,7 @@ export async function executeChapterStep({
     writerFormatRetries,
     emptyResponseRetries,
     recordRetries,
+    recordFormatRetries,
     recordEmptyResponseRetries,
     lengthTruncatedAttempts,
     writerAttempts,

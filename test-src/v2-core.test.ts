@@ -18,6 +18,8 @@ import type { NovelConfig } from "../src/core/utils.js"
 import { checkTypography, fixTypography, formatFixChanges } from "../src/core/typography.js"
 import {
   checkProse,
+  countStockPhraseUsage,
+  STOCK_PHRASE_RULES,
   scaledPhraseLimit,
   extractChapterEnding,
   findCrossChapterRepeats,
@@ -414,6 +416,32 @@ describe("文章の点検（prose）: 反AIと教訓まとめ検出", () => {
     ].join("\n")
     const issues = checkProse(twice).filter((i) => i.phrase === "その瞬間")
     assert.equal(issues.length, 1)
+  })
+
+  test("countStockPhraseUsage は許容回数以下も地の文のみ生件数で数え、会話文と preachy-ending を除外する", () => {
+    assert.equal(STOCK_PHRASE_RULES.length, 21)
+    for (const r of STOCK_PHRASE_RULES) {
+      assert.equal(typeof r.phrase, "string")
+      assert.equal(typeof r.source, "string")
+      assert.equal(typeof r.flags, "string")
+    }
+
+    const sample = [
+      "# 第1話　テスト",
+      "　彼女はそっと扉を開け、思わず息を呑んだ。",
+      "「思わず静かにその瞬間って言っちゃったよ」",
+      "　彼は「そっと肩をすくめる」と呟いた。",
+      "　この出来事で大切なことに気づいた。",
+    ].join("\n")
+    // 許容回数以下なので checkProse の stock-phrase は 0 件だが、countStockPhraseUsage は生件数を返す
+    assert.equal(checkProse(sample).filter((i) => i.rule === "stock-phrase").length, 0)
+    const usage = countStockPhraseUsage(sample)
+    assert.equal(usage.total, 3)
+    assert.deepEqual(usage.byPhrase, {
+      そっと: 1,
+      思わず: 1,
+      "言葉を失う・息を呑む": 1,
+    })
   })
 
   test("文字数に応じて許容回数が3,000字基準でスケールし、serious では1文100字まで許容する", () => {

@@ -11,7 +11,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { checkTypography } from "../../dist/core/typography.js"
-import { checkProse, findCrossChapterRepeats } from "../../dist/core/prose.js"
+import { checkProse, countStockPhraseUsage, findCrossChapterRepeats } from "../../dist/core/prose.js"
 import {
   extractStyleSample,
   analyzeStyleMetrics,
@@ -39,6 +39,27 @@ export const PROSE_METRIC_RULES = [
   "long-sentence",
   "cross-chapter-repeat",
 ]
+
+/** skills/novel-writing/SKILL.md「A. 避ける定型句」（no-ban-list 削除対象）に対応する 16 規則 */
+export const SKILL_BAN_LIST_STOCK_PHRASES = Object.freeze([
+  "思わず",
+  "〜ずにはいられない",
+  "胸が熱く・込み上げる",
+  "その瞬間",
+  "まるで・かのよう",
+  "世界が止まった",
+  "目の奥・瞳の色",
+  "心の中で呟く",
+  "言葉を失う・息を呑む",
+  "静寂が支配・空気が張り詰める",
+  "総括の語",
+  "硬い漢語調",
+  "できあいの擬音",
+  "肩をすくめる",
+  "小さく笑う・苦笑",
+  "〜気がした",
+])
+const SKILL_BAN_LIST_SET = new Set(SKILL_BAN_LIST_STOCK_PHRASES)
 
 function readJsonIfExists(path) {
   if (!existsSync(path)) return null
@@ -72,6 +93,10 @@ export async function collectProjectMetrics(projectDir, chapters = [1, 2, 3]) {
   let outOfRangeChapters = 0
   let sumAbsWordDeviationPct = 0
   let sumAbsWordDeviationPctWritten = 0
+  let stockPhraseSkillCount = 0
+  let stockPhraseOtherCount = 0
+  let stockPhraseRawCount = 0
+  const stockPhraseRawByPhrase = {}
   const proseByRule = Object.fromEntries(PROSE_METRIC_RULES.map((r) => [r, 0]))
   const typographyByRule = {}
 
@@ -111,6 +136,14 @@ export async function collectProjectMetrics(projectDir, chapters = [1, 2, 3]) {
     const proseIssues = checkProse(raw, { seriousness })
     for (const issue of proseIssues) {
       proseByRule[issue.rule] = (proseByRule[issue.rule] ?? 0) + 1
+    }
+
+    const stockUsage = countStockPhraseUsage(raw)
+    stockPhraseRawCount += stockUsage.total
+    for (const [phrase, count] of Object.entries(stockUsage.byPhrase)) {
+      stockPhraseRawByPhrase[phrase] = (stockPhraseRawByPhrase[phrase] ?? 0) + count
+      if (SKILL_BAN_LIST_SET.has(phrase)) stockPhraseSkillCount += count
+      else stockPhraseOtherCount += count
     }
 
     totalBodyChars += words
@@ -187,6 +220,10 @@ export async function collectProjectMetrics(projectDir, chapters = [1, 2, 3]) {
     proseWarningsPer1kChars,
     proseByRule,
     proseByRulePer1kChars,
+    stockPhraseSkillCount,
+    stockPhraseOtherCount,
+    stockPhraseRawCount,
+    stockPhraseRawByPhrase,
     styleDrift,
     statusWarningsCount: statusWarningLines.length,
     statusWarningLines,
@@ -201,9 +238,11 @@ function avg(nums) {
 /** 複数試行（run-1〜run-N）の機械指標を集約する */
 export function aggregateRunsMetrics(runMetricsList) {
   const emptyRuleDensity = Object.fromEntries(PROSE_METRIC_RULES.map((r) => [r, 0]))
+  const emptyRuleTotal = Object.fromEntries(PROSE_METRIC_RULES.map((r) => [r, 0]))
   if (runMetricsList.length === 0) {
     return {
       runCount: 0,
+      totalBodyChars: 0,
       totalBodyCharsAvg: 0,
       writtenChaptersTotal: 0,
       meanAbsWordDeviationPctAvg: 0,
@@ -217,7 +256,12 @@ export function aggregateRunsMetrics(runMetricsList) {
       proseWarningsTotalAvg: 0,
       proseWarningsPer1kCharsAvg: 0,
       proseWarningsPer1kCharsRange: [0, 0],
+      proseByRuleTotal: emptyRuleTotal,
       proseByRulePer1kCharsAvg: emptyRuleDensity,
+      stockPhraseSkillTotal: 0,
+      stockPhraseOtherTotal: 0,
+      stockPhraseRawTotal: 0,
+      stockPhraseRawByPhrase: {},
       statusWarningsTotal: 0,
       statusWarningsAvg: 0,
       styleDriftAvg: null,
@@ -244,13 +288,29 @@ export function aggregateRunsMetrics(runMetricsList) {
   const meanAbsWordDeviationPctWrittenAvg =
     writtenChaptersTotal > 0 ? Number((sumAbsWordDevWritten / writtenChaptersTotal).toFixed(1)) : null
 
+  const totalBodyChars = runMetricsList.reduce((s, m) => s + (m.totalBodyChars ?? 0), 0)
   const densities = runMetricsList.map((m) => m.proseWarningsPer1kChars)
+  const proseByRuleTotal = Object.fromEntries(
+    PROSE_METRIC_RULES.map((rule) => [
+      rule,
+      runMetricsList.reduce((s, m) => s + (m.proseByRule?.[rule] ?? 0), 0),
+    ]),
+  )
   const proseByRulePer1kCharsAvg = Object.fromEntries(
     PROSE_METRIC_RULES.map((rule) => [
       rule,
       Number(avg(runMetricsList.map((m) => m.proseByRulePer1kChars?.[rule] ?? 0)).toFixed(3)),
     ]),
   )
+  const stockPhraseSkillTotal = runMetricsList.reduce((s, m) => s + (m.stockPhraseSkillCount ?? 0), 0)
+  const stockPhraseOtherTotal = runMetricsList.reduce((s, m) => s + (m.stockPhraseOtherCount ?? 0), 0)
+  const stockPhraseRawTotal = runMetricsList.reduce((s, m) => s + (m.stockPhraseRawCount ?? 0), 0)
+  const stockPhraseRawByPhrase = {}
+  for (const m of runMetricsList) {
+    for (const [phrase, count] of Object.entries(m.stockPhraseRawByPhrase ?? {})) {
+      stockPhraseRawByPhrase[phrase] = (stockPhraseRawByPhrase[phrase] ?? 0) + count
+    }
+  }
 
   const drifts = runMetricsList.map((m) => m.styleDrift).filter(Boolean)
   // 符号付きの差が試行間で打ち消し合わないよう、絶対値の平均（AbsDelta）を主指標として算出する
@@ -274,6 +334,7 @@ export function aggregateRunsMetrics(runMetricsList) {
 
   return {
     runCount: runMetricsList.length,
+    totalBodyChars,
     totalBodyCharsAvg: Math.round(avg(runMetricsList.map((m) => m.totalBodyChars))),
     writtenChaptersTotal,
     meanAbsWordDeviationPctAvg: Number(avg(runMetricsList.map((m) => m.meanAbsWordDeviationPct)).toFixed(1)),
@@ -287,7 +348,12 @@ export function aggregateRunsMetrics(runMetricsList) {
     proseWarningsTotalAvg: Number(avg(runMetricsList.map((m) => m.proseWarningsTotal)).toFixed(2)),
     proseWarningsPer1kCharsAvg: Number(avg(densities).toFixed(3)),
     proseWarningsPer1kCharsRange: [Math.min(...densities), Math.max(...densities)],
+    proseByRuleTotal,
     proseByRulePer1kCharsAvg,
+    stockPhraseSkillTotal,
+    stockPhraseOtherTotal,
+    stockPhraseRawTotal,
+    stockPhraseRawByPhrase,
     statusWarningsTotal: runMetricsList.reduce((s, m) => s + m.statusWarningsCount, 0),
     statusWarningsAvg: Number(avg(runMetricsList.map((m) => m.statusWarningsCount)).toFixed(2)),
     styleDriftAvg,
