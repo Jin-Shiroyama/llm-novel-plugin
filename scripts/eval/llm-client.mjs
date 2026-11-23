@@ -75,6 +75,7 @@ export class BudgetTracker {
     completionTokens = 0,
     totalTokens,
     model = null,
+    finishReason = null,
     failed = false,
     isTransientRetry = false,
   }) {
@@ -95,6 +96,7 @@ export class BudgetTracker {
       completionTokens: c,
       totalTokens: t,
       model: failed ? null : (model ?? null),
+      finishReason: failed ? null : (finishReason ?? null),
       failed,
       isTransientRetry,
     })
@@ -298,11 +300,25 @@ export async function callChatCompletion({
       )
     }
 
-    const content = normalizeMessageContent(data?.choices?.[0]?.message?.content)
+    const choice = data?.choices?.[0]
+    const content = normalizeMessageContent(choice?.message?.content)
+    const finishReason = typeof choice?.finish_reason === "string" ? choice.finish_reason : null
+    const reasoningRaw =
+      typeof choice?.message?.reasoning_content === "string"
+        ? choice.message.reasoning_content
+        : typeof choice?.message?.reasoning === "string"
+          ? choice.message.reasoning
+          : ""
+    const reasoningChars = reasoningRaw.length
     const responseModel = typeof data?.model === "string" && data.model.length > 0 ? data.model : model
     const promptTokens = Number(data?.usage?.prompt_tokens ?? 0)
     const completionTokens = Number(data?.usage?.completion_tokens ?? 0)
     const totalTokens = Number(data?.usage?.total_tokens ?? promptTokens + completionTokens)
+    const rawReasoningTokens = data?.usage?.completion_tokens_details?.reasoning_tokens ?? data?.usage?.reasoning_tokens
+    const reasoningTokens =
+      rawReasoningTokens !== null && rawReasoningTokens !== undefined && Number.isFinite(Number(rawReasoningTokens))
+        ? Number(rawReasoningTokens)
+        : null
 
     budget?.record({
       label: attemptLabel,
@@ -310,6 +326,7 @@ export async function callChatCompletion({
       completionTokens,
       totalTokens,
       model: responseModel,
+      finishReason,
       failed: false,
       isTransientRetry,
     })
@@ -317,7 +334,9 @@ export async function callChatCompletion({
     return {
       content,
       model: responseModel,
-      usage: { promptTokens, completionTokens, totalTokens },
+      finishReason,
+      reasoningChars,
+      usage: { promptTokens, completionTokens, totalTokens, reasoningTokens },
       raw: data,
     }
   }

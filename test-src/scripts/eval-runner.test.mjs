@@ -322,6 +322,49 @@ describe("評価ランナー: metrics（規則別密度・文体ズレ絶対値�
     assert.equal(agg.styleDriftAvg.signed.dialogueCharRatioDelta, 0)
     assert.equal(agg.proseByRulePer1kCharsAvg["stock-phrase"], 0.4)
   })
+
+  test("aggregateRunsMetrics は書けた話の文字数ズレ平均を全試行の書けた話で等重み集計する（run平均の再平均にしない）", () => {
+    const run1 = {
+      totalBodyChars: 1800,
+      meanAbsWordDeviationPct: 80,
+      outOfRangeChapters: 3,
+      missingChapters: 2,
+      typographyErrors: 0,
+      typographyWarnings: 0,
+      proseWarningsTotal: 0,
+      proseWarningsPer1kChars: 0,
+      proseByRulePer1kChars: {},
+      statusWarningsCount: 0,
+      styleDrift: null,
+      chapters: [
+        { chapter: 1, missing: false, deviationPct: -40.0 },
+        { chapter: 2, missing: true, deviationPct: -100 },
+        { chapter: 3, missing: true, deviationPct: -100 },
+      ],
+    }
+    const run2 = {
+      totalBodyChars: 8100,
+      meanAbsWordDeviationPct: 10,
+      outOfRangeChapters: 0,
+      missingChapters: 0,
+      typographyErrors: 0,
+      typographyWarnings: 0,
+      proseWarningsTotal: 0,
+      proseWarningsPer1kChars: 0,
+      proseByRulePer1kChars: {},
+      statusWarningsCount: 0,
+      styleDrift: null,
+      chapters: [
+        { chapter: 1, missing: false, deviationPct: -10.0 },
+        { chapter: 2, missing: false, deviationPct: -10.0 },
+        { chapter: 3, missing: false, deviationPct: -10.0 },
+      ],
+    }
+    const agg = aggregateRunsMetrics([run1, run2])
+    assert.equal(agg.writtenChaptersTotal, 4)
+    // (40 + 10 + 10 + 10) / 4 = 17.5%（run平均の再平均 (40+10)/2 = 25.0% ではないこと）
+    assert.equal(agg.meanAbsWordDeviationPctWrittenAvg, 17.5)
+  })
 })
 
 describe("評価ランナー: writer-harness（タグ検証・執筆/記録更新の再試行・予算計上）", () => {
@@ -405,6 +448,106 @@ describe("評価ランナー: writer-harness（タグ検証・執筆/記録更�
       // システムプロンプトに固定上書き指示が含まれること
       const built = buildWriterSystemPrompt({ agentPrompt: plugin.writerAgent.prompt, skillDocs: [] })
       assert.ok(built.prompt.includes(RUNNER_OVERRIDE_INSTRUCTION))
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  test("executeChapterStep は空応答（finish_reason=length）再試行時に空の assistant メッセージを会話履歴へ積まず診断を残す", async () => {
+    const tmp = makeTempDir("llm-novel-empty-retry-")
+    try {
+      const plugin = await loadPluginFromRoot(root, { allowStaleDist: true })
+      const { cpSync } = await import("node:fs")
+      cpSync(join(root, "examples/fantasy-balanced"), tmp, { recursive: true })
+
+      const budget = new BudgetTracker({ maxCalls: 10 })
+      const validBody = "　石畳を北へ28歩進んだところで、フィナが足を止めた。\n「レオ、壁の裏に空間があるのか？」\n「間違いない。〈歩数計〉の計測が3段ぶんずれている」\n".repeat(
+        8,
+      )
+      const capturedMessages = []
+      let idx = 0
+      const responses = [
+        // 1回目執筆: finish_reason=length の空応答
+        {
+          content: "",
+          finishReason: "length",
+          reasoningChars: 12000,
+          usage: { promptTokens: 200, completionTokens: 24000, totalTokens: 24200, reasoningTokens: 24000 },
+        },
+        // 2回目執筆: 成功
+        {
+          content: `<タイトル>隠し通路の計測</タイトル>\n<本文>\n${validBody}\n</本文>`,
+          finishReason: "stop",
+          reasoningChars: 500,
+          usage: { promptTokens: 200, completionTokens: 1500, totalTokens: 1700, reasoningTokens: 400 },
+        },
+        // 1回目記録更新: 空応答
+        {
+          content: "   ",
+          finishReason: "length",
+          reasoningChars: 8000,
+          usage: { promptTokens: 150, completionTokens: 8000, totalTokens: 8150, reasoningTokens: 8000 },
+        },
+        // 2回目記録更新: 正常
+        {
+          content: JSON.stringify({
+            characterState: { updates: [{ name: "レオ", changes: { mentalState: "手応えあり" } }] },
+            summary: "第1話で隠し部屋と古い金属片を見つけた。",
+            foreshadow: { items: [{ id: "F1", status: "planted" }] },
+          }),
+          finishReason: "stop",
+          reasoningChars: 100,
+          usage: { promptTokens: 150, completionTokens: 200, totalTokens: 350, reasoningTokens: 50 },
+        },
+      ]
+
+      const step = await executeChapterStep({
+        plugin,
+        projectDir: tmp,
+        chapterNumber: 1,
+        llmConfig: { model: "mock-reasoning", apiKey: "k", temperature: 0.75 },
+        budget,
+        minBodyChars: 200,
+        callLlm: async ({ messages, budget: b, label }) => {
+          b.assertCanCall(label)
+          capturedMessages.push(messages.map((m) => ({ role: m.role, content: m.content })))
+          const r = responses[idx++]
+          b.record({
+            label,
+            promptTokens: r.usage.promptTokens,
+            completionTokens: r.usage.completionTokens,
+            totalTokens: r.usage.totalTokens,
+            model: "mock-reasoning",
+            finishReason: r.finishReason,
+          })
+          return { ...r, model: "mock-reasoning" }
+        },
+      })
+
+      assert.equal(step.status, "ok")
+      assert.equal(step.emptyResponseRetries, 1)
+      assert.equal(step.writerFormatRetries, 0)
+      assert.equal(step.recordEmptyResponseRetries, 1)
+      assert.equal(step.lengthTruncatedAttempts, 2)
+      assert.equal(step.writerAttempts.length, 2)
+      assert.equal(step.writerAttempts[0].finishReason, "length")
+      assert.equal(step.writerAttempts[0].failureType, "empty_response")
+      assert.equal(step.writerAttempts[0].reasoningTokens, 24000)
+      assert.ok(step.writerAttempts[0].failureReason.includes("--writer-max-tokens"))
+      assert.equal(step.recordAttempts[0].finishReason, "length")
+      assert.equal(step.recordAttempts[0].failureType, "empty_response")
+
+      // 執筆・記録更新とも、空応答再試行で空の assistant メッセージが積まれていないこと
+      assert.equal(capturedMessages[1].length, capturedMessages[0].length, "執筆2回目の履歴に空 assistant を積まないこと")
+      assert.equal(
+        capturedMessages[1].some((m) => m.role === "assistant" && m.content.trim() === ""),
+        false,
+      )
+      assert.equal(capturedMessages[3].length, capturedMessages[2].length, "記録更新2回目の履歴に空 assistant を積まないこと")
+      assert.equal(
+        capturedMessages[3].some((m) => m.role === "assistant" && m.content.trim() === ""),
+        false,
+      )
     } finally {
       rmSync(tmp, { recursive: true, force: true })
     }
@@ -599,9 +742,122 @@ describe("評価ランナー: judge（位置スワップ・確定率 d・偽陽�
       }).verdict,
       "ADOPT_CANDIDATE",
     )
+
+    // 文字数判定（書けた話の平均絶対ズレ）：+7.9pt は許容、+8.0pt 以上で REJECT_REGRESSION（範囲外件数は判定に使わない）
+    assert.equal(
+      evaluateDecision({
+        criteria: "simplify",
+        pairSummary: allTie,
+        overallMetricsA: { ...cleanMetrics, outOfRangeChaptersTotal: 1, meanAbsWordDeviationPctWrittenAvg: 19.1 },
+        overallMetricsB: { ...cleanMetrics, outOfRangeChaptersTotal: 12, meanAbsWordDeviationPctWrittenAvg: 27.0 },
+      }).verdict,
+      "ADOPT_CANDIDATE",
+    )
+    assert.equal(
+      evaluateDecision({
+        criteria: "simplify",
+        pairSummary: allTie,
+        overallMetricsA: { ...cleanMetrics, meanAbsWordDeviationPctWrittenAvg: 19.1 },
+        overallMetricsB: { ...cleanMetrics, meanAbsWordDeviationPctWrittenAvg: 27.1 },
+      }).verdict,
+      "REJECT_REGRESSION",
+    )
   })
 
-  test("checkRunCompatibility は未コミット変更・モデル違い・skillVariantとcommitの同時変更・成果物指紋不整合を警告する", () => {
+  test("実測 A/A データ（038ede6 DeepSeek vs DeepSeek）は A↔B を入れ替えても improve / simplify とも不合格にならない", () => {
+    const metricsA = {
+      typographyErrorsTotal: 0,
+      missingChaptersTotal: 0,
+      statusWarningsTotal: 0,
+      outOfRangeChaptersTotal: 8,
+      meanAbsWordDeviationPctAvg: 19.1,
+      meanAbsWordDeviationPctWrittenAvg: 19.1,
+      proseWarningsPer1kCharsAvg: 0.069,
+      proseByRulePer1kCharsAvg: { "stock-phrase": 0.038 },
+    }
+    const metricsB = {
+      typographyErrorsTotal: 0,
+      missingChaptersTotal: 0,
+      statusWarningsTotal: 0,
+      outOfRangeChaptersTotal: 7,
+      meanAbsWordDeviationPctAvg: 20.0,
+      meanAbsWordDeviationPctWrittenAvg: 20.0,
+      proseWarningsPer1kCharsAvg: 0.101,
+      proseByRulePer1kCharsAvg: { "stock-phrase": 0.034 },
+    }
+    const mkSwappedPair = (axesMap) => ({
+      pairLabel: "aa",
+      exampleName: "romcom-light",
+      axes: Object.fromEntries(
+        Object.entries(axesMap).map(([axis, [p1, p2]]) => [
+          axis,
+          { ...resolveSwappedVote(p1, p2), pass1: { winner: p1, reason: "" }, pass2: { winner: p2, reason: "" } },
+        ]),
+      ),
+    })
+    // 2026-11-22 実測 A/A（4ペア、GLM 審査）の正確なパス勝敗（先出し X 18/24 = 75.0%）
+    const pairsAB = [
+      mkSwappedPair({ buildup_and_payoff: ["Y", "X"], tone_and_ng: ["tie", "tie"], character_voice: ["X", "Y"], overall: ["X", "X"] }),
+      mkSwappedPair({ buildup_and_payoff: ["X", "X"], tone_and_ng: ["tie", "tie"], character_voice: ["X", "X"], overall: ["X", "X"] }),
+      mkSwappedPair({ buildup_and_payoff: ["Y", "X"], tone_and_ng: ["tie", "tie"], character_voice: ["Y", "X"], overall: ["Y", "X"] }),
+      mkSwappedPair({ buildup_and_payoff: ["X", "Y"], tone_and_ng: ["tie", "tie"], character_voice: ["X", "X"], overall: ["X", "X"] }),
+    ]
+    // A と B を入れ替えた場合のペア結果（Pass1/Pass2 の立場が入れ替わるため勝敗の A/B が反転）
+    const pairsBA = pairsAB.map((p) => ({
+      ...p,
+      axes: Object.fromEntries(
+        Object.entries(p.axes).map(([axis, v]) => [
+          axis,
+          {
+            ...v,
+            outcome: v.outcome === "A" ? "B" : v.outcome === "B" ? "A" : v.outcome,
+            pass1: v.pass2,
+            pass2: v.pass1,
+          },
+        ]),
+      ),
+    }))
+
+    const summaryAB = summarizePairJudgments(pairsAB)
+    const summaryBA = summarizePairJudgments(pairsBA)
+    assert.equal(summaryAB.positionBias.firstPositionWins, 18)
+    assert.equal(summaryAB.positionBias.nonTiePassVotes, 24)
+    assert.equal(summaryAB.positionBias.firstPositionWinRate, 0.75)
+
+    // A→B、B→A のどちらの順でも simplify は ADOPT_CANDIDATE、improve は HOLD_NO_DIFF（不合格にならないこと）
+    assert.equal(
+      evaluateDecision({ criteria: "simplify", pairSummary: summaryAB, overallMetricsA: metricsA, overallMetricsB: metricsB })
+        .verdict,
+      "ADOPT_CANDIDATE",
+    )
+    assert.equal(
+      evaluateDecision({ criteria: "simplify", pairSummary: summaryBA, overallMetricsA: metricsB, overallMetricsB: metricsA })
+        .verdict,
+      "ADOPT_CANDIDATE",
+    )
+    assert.equal(
+      evaluateDecision({
+        criteria: "improve",
+        primaryAxis: "buildup_and_payoff",
+        pairSummary: summaryAB,
+        overallMetricsA: metricsA,
+        overallMetricsB: metricsB,
+      }).verdict,
+      "HOLD_NO_DIFF",
+    )
+    assert.equal(
+      evaluateDecision({
+        criteria: "improve",
+        primaryAxis: "buildup_and_payoff",
+        pairSummary: summaryBA,
+        overallMetricsA: metricsB,
+        overallMetricsB: metricsA,
+      }).verdict,
+      "HOLD_NO_DIFF",
+    )
+  })
+
+  test("checkRunCompatibility は未コミット変更・モデル違い・skillVariantとcommitの同時変更・成果物指紋不整合を警告し、書き手設定違いを A/A にしない", () => {
     const metaA = {
       label: "a",
       git: { commit: "aaaa111", shortCommit: "aaaa111", dirty: true },
@@ -635,6 +891,40 @@ describe("評価ランナー: judge（位置スワップ・確定率 d・偽陽�
     assert.ok(compat.warnings.some((w) => w.includes("dist/ と skills/ の指紋が完全に一致")))
     assert.ok(compat.warnings.some((w) => w.includes("--allow-stale-dist")))
     assert.ok(compat.warnings.some((w) => w.includes("エラーで途中停止")))
+
+    // 同一 commit・同一指紋・同一プロンプトでも書き手モデルが異なれば A/A メモを出さず model_or_config_comparison になること
+    const modelCmp = checkRunCompatibility(
+      {
+        label: "glm",
+        git: { commit: "cccc333", shortCommit: "cccc333", dirty: false },
+        artifacts: { distHash: "dist-1", skillsHash: "skills-1", staleDistBypassed: false },
+        skillVariant: "default",
+        writerModel: "glm-5.3",
+        writerTemperature: 0.75,
+        examples: ["romcom-light"],
+        chapters: [1, 2],
+        runs: 2,
+        systemPromptHashes: { "romcom-light": "h1" },
+        budget: { responseModels: ["glm-5.3"] },
+      },
+      {
+        label: "deepseek",
+        git: { commit: "cccc333", shortCommit: "cccc333", dirty: false },
+        artifacts: { distHash: "dist-1", skillsHash: "skills-1", staleDistBypassed: false },
+        skillVariant: "default",
+        writerModel: "deepseek-v4.1",
+        writerTemperature: 0.75,
+        examples: ["romcom-light"],
+        chapters: [1, 2],
+        runs: 2,
+        systemPromptHashes: { "romcom-light": "h1" },
+        budget: { responseModels: ["deepseek-v4.1"] },
+      },
+    )
+    assert.equal(modelCmp.comparisonType, "model_or_config_comparison")
+    assert.equal(modelCmp.sameWriterConfig, false)
+    assert.ok(!modelCmp.notes.some((n) => n.includes("A/A テスト条件")))
+    assert.ok(modelCmp.notes.some((n) => n.includes("モデル／設定比較")))
 
     // A/A 条件（同一 commit・同一 skillVariant）なのに distHash が異なる場合も警告し、A/A メモを出さないこと
     const aaMismatch = checkRunCompatibility(
@@ -750,7 +1040,66 @@ describe("評価ランナー: CLI エンドツーエンド --dry-run（run / met
       assert.ok(cmp.markdown.includes("`no-ban-list` 比較の解釈注記"))
       assert.ok(cmp.markdown.includes("できあいの言い回し (stock-phrase)"))
       assert.ok(cmp.markdown.includes("文体見本ズレ：1文平均 絶対値平均"))
-      assert.ok(cmp.markdown.includes("合算の誤却下確率上限目安"))
+      assert.ok(cmp.markdown.includes("### 作品別の文体見本ズレ"))
+      assert.ok(cmp.markdown.includes("romcom-light：過去形(た/だ)比率"))
+      assert.ok(cmp.markdown.includes("fantasy-balanced：過去形(た/だ)比率"))
+      assert.ok(cmp.markdown.includes("合算の誤却下確率上限目安（ペア審査分のみ）"))
+
+      // 審査の空応答（finish_reason=length）再試行では空の assistant メッセージを積まず、finishReason を記録する
+      const emptyJudgeBudget = new BudgetTracker({ maxCalls: 10 })
+      const emptyJudgeCaptured = []
+      const emptyJudgeResponses = [
+        { content: "", finishReason: "length" },
+        {
+          content: JSON.stringify({
+            buildup_and_payoff: { winner: "Y", reason: "pass1" },
+            tone_and_ng: { winner: "tie", reason: "ok" },
+            character_voice: { winner: "tie", reason: "ok" },
+            overall: { winner: "Y", reason: "pass1" },
+          }),
+          finishReason: "stop",
+        },
+        {
+          content: JSON.stringify({
+            buildup_and_payoff: { winner: "X", reason: "pass2" },
+            tone_and_ng: { winner: "tie", reason: "ok" },
+            character_voice: { winner: "tie", reason: "ok" },
+            overall: { winner: "X", reason: "pass2" },
+          }),
+          finishReason: "stop",
+        },
+      ]
+      let ejIdx = 0
+      const judgedEmptyRetry = await judgePairSwapped({
+        exampleName: "romcom-light",
+        projectDirA: join(runA.runRootDir, "romcom-light/run-1"),
+        projectDirB: join(runB.runRootDir, "romcom-light/run-1"),
+        chapters: [1, 2],
+        judgeLlmConfig: { model: "mock-judge", apiKey: "k", temperature: 0 },
+        budget: emptyJudgeBudget,
+        callLlm: async ({ messages, budget: b, label }) => {
+          b.assertCanCall(label)
+          emptyJudgeCaptured.push(messages.map((m) => ({ role: m.role, content: m.content })))
+          const r = emptyJudgeResponses[ejIdx++]
+          b.record({ label, promptTokens: 100, completionTokens: 50, model: "mock-judge", finishReason: r.finishReason })
+          return {
+            content: r.content,
+            finishReason: r.finishReason,
+            model: "mock-judge",
+            usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150, reasoningTokens: null },
+          }
+        },
+        pairLabel: "empty-retry-pair",
+      })
+      assert.equal(emptyJudgeBudget.calls, 3)
+      assert.equal(judgedEmptyRetry.diagnostics.pass1.emptyResponseRetries, 1)
+      assert.equal(judgedEmptyRetry.diagnostics.pass1.attempts[0].finishReason, "length")
+      assert.equal(judgedEmptyRetry.diagnostics.pass1.attempts[0].failureType, "empty_response")
+      assert.equal(emptyJudgeCaptured[1].length, emptyJudgeCaptured[0].length, "審査空応答の再試行で空 assistant を積まないこと")
+      assert.equal(
+        emptyJudgeCaptured[1].some((m) => m.role === "assistant" && m.content.trim() === ""),
+        false,
+      )
 
       // 審査 JSON 解析失敗時は 1 回だけ再試行し予算へ計上する
       const judgeBudget = new BudgetTracker({ maxCalls: 10 })
@@ -787,6 +1136,7 @@ describe("評価ランナー: CLI エンドツーエンド --dry-run（run / met
       })
       assert.equal(judgeBudget.calls, 3, "Pass1の1回再試行＋Pass2＝計3回が予算に計上されること")
       assert.equal(judgedRetry.axes.buildup_and_payoff.outcome, "B")
+      assert.equal(judgedRetry.diagnostics.pass1.formatRetries, 1)
 
       // 実行途中のトークン上限到達でも、完了済み試行のみ保持して安全停止し、compare は未完了試行を除外する
       const stoppedRun = await runCommand({

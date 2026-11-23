@@ -9,6 +9,9 @@ import { PROSE_METRIC_RULES } from "./metrics.mjs"
 
 export const EVAL_AXES = ["buildup_and_payoff", "tone_and_ng", "character_voice", "overall"]
 
+/** 書けた話の文字数ズレ（絶対値平均）の許容悪化幅（ポイント未満。+8.0pt 以上悪化で不合格） */
+export const WORD_DEVIATION_REGRESSION_TOLERANCE_PT = 8.0
+
 export const AXIS_LABELS = {
   buildup_and_payoff: "溜めと見返り（平坦化チェック）",
   tone_and_ng: "トーン適合・NGライン遵守",
@@ -145,8 +148,25 @@ function loadConcatenatedChapters(runDir, chapters) {
   return parts.join("\n\n---\n\n")
 }
 
+function summarizeJudgeAttempt(attempt, res, failureType = null, failureReason = null) {
+  const contentText = String(res?.content ?? "")
+  return {
+    attempt,
+    finishReason: res?.finishReason ?? null,
+    contentChars: contentText.length,
+    completionTokens: Number.isFinite(res?.usage?.completionTokens) ? res.usage.completionTokens : null,
+    reasoningTokens: Number.isFinite(res?.usage?.reasoningTokens) ? res.usage.reasoningTokens : null,
+    reasoningChars: Number.isFinite(res?.reasoningChars) ? res.reasoningChars : 0,
+    failureType,
+    failureReason,
+  }
+}
+
 async function callJudgePassWithRetry({ messages, judgeLlmConfig, budget, callLlm, label }) {
   const conv = [...messages]
+  const attempts = []
+  let emptyResponseRetries = 0
+  let formatRetries = 0
   for (let attempt = 1; attempt <= 2; attempt++) {
     const res = await callLlm({
       ...judgeLlmConfig,
@@ -154,15 +174,39 @@ async function callJudgePassWithRetry({ messages, judgeLlmConfig, budget, callLl
       budget,
       label: attempt === 1 ? label : `${label}-retry`,
     })
+    const rawContent = String(res.content ?? "")
+    if (rawContent.trim().length === 0) {
+      const isLengthTruncated = res.finishReason === "length"
+      const reason = isLengthTruncated
+        ? "空応答が返されました（finish_reason=length: 推論等で出力上限を使い切った可能性があります。--judge-max-tokens や --judge-extra-body の設定を見直してください）"
+        : `空応答が返されました（content が空 / finish_reason=${res.finishReason ?? "unknown"}）`
+      attempts.push(summarizeJudgeAttempt(attempt, res, "empty_response", reason))
+      if (isLengthTruncated) {
+        console.error(`[eval judge] ⚠️ ${label} attempt${attempt}: ${reason}`)
+      }
+      if (attempt === 2) {
+        throw new Error(`審査応答が空のまま2回失敗しました（${label} / finish_reason=${res.finishReason ?? "unknown"}）: ${reason}`)
+      }
+      emptyResponseRetries++
+      // 空応答では空の assistant メッセージを会話履歴へ積まず、元プロンプトをそのまま送り直す
+      continue
+    }
+
     try {
-      return parseJudgeResponse(res.content)
+      const parsed = parseJudgeResponse(rawContent)
+      attempts.push(summarizeJudgeAttempt(attempt, res, null, null))
+      return { parsed, attempts, emptyResponseRetries, formatRetries }
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err)
+      attempts.push(summarizeJudgeAttempt(attempt, res, "json_parse_error", reason))
       if (attempt === 2) {
-        throw new Error(`審査応答の JSON 解析に2回失敗しました（${label}）: ${reason}`)
+        throw new Error(
+          `審査応答の JSON 解析に2回失敗しました（${label} / finish_reason=${res.finishReason ?? "unknown"}）: ${reason}`,
+        )
       }
+      formatRetries++
       conv.push(
-        { role: "assistant", content: res.content },
+        { role: "assistant", content: rawContent },
         {
           role: "user",
           content: `前回の応答は JSON として解析できませんでした（${reason}）。指定された 4 軸を含む有効な JSON オブジェクトのみを返してください。`,
@@ -189,7 +233,7 @@ export async function judgePairSwapped({
   const textB = loadConcatenatedChapters(projectDirB, chapters)
 
   // Pass 1: X = A, Y = B
-  const pass1 = await callJudgePassWithRetry({
+  const pass1Res = await callJudgePassWithRetry({
     messages: buildJudgeMessages({ exampleName, conceptMd, chaptersTextX: textA, chaptersTextY: textB }),
     judgeLlmConfig,
     budget,
@@ -198,7 +242,7 @@ export async function judgePairSwapped({
   })
 
   // Pass 2: X = B, Y = A
-  const pass2 = await callJudgePassWithRetry({
+  const pass2Res = await callJudgePassWithRetry({
     messages: buildJudgeMessages({ exampleName, conceptMd, chaptersTextX: textB, chaptersTextY: textA }),
     judgeLlmConfig,
     budget,
@@ -208,11 +252,11 @@ export async function judgePairSwapped({
 
   const resolved = {}
   for (const axis of EVAL_AXES) {
-    const vote = resolveSwappedVote(pass1[axis].winner, pass2[axis].winner)
+    const vote = resolveSwappedVote(pass1Res.parsed[axis].winner, pass2Res.parsed[axis].winner)
     resolved[axis] = {
       ...vote,
-      pass1: pass1[axis],
-      pass2: pass2[axis],
+      pass1: pass1Res.parsed[axis],
+      pass2: pass2Res.parsed[axis],
     }
   }
 
@@ -220,15 +264,50 @@ export async function judgePairSwapped({
     pairLabel,
     exampleName,
     axes: resolved,
+    diagnostics: {
+      pass1: {
+        attempts: pass1Res.attempts,
+        emptyResponseRetries: pass1Res.emptyResponseRetries,
+        formatRetries: pass1Res.formatRetries,
+      },
+      pass2: {
+        attempts: pass2Res.attempts,
+        emptyResponseRetries: pass2Res.emptyResponseRetries,
+        formatRetries: pass2Res.formatRetries,
+      },
+    },
   }
 }
 
-/** 複数ペアの審査結果から軸ごとの勝率・確定率 d・誤判定確率目安（improve 誤採用／simplify 誤却下）を集計する */
+/** 複数ペアの審査結果から軸ごとの勝率・確定率 d・位置バイアス・誤判定確率目安を集計する */
 export function summarizePairJudgments(pairResults, opts = {}) {
   const totalPairs = pairResults.length
   const requiredWinsForImprove = totalPairs > 0 ? Math.ceil(totalPairs * 0.75) : 0
   const requiredWinsForReject = requiredWinsForImprove
   const byAxis = {}
+
+  let firstPositionWins = 0
+  let secondPositionWins = 0
+  let tiePassVotes = 0
+  let judgeEmptyResponseRetries = 0
+  let judgeFormatRetries = 0
+  let judgeLengthTruncatedAttempts = 0
+  let judgeTotalPasses = 0
+
+  for (const pair of pairResults) {
+    if (pair.diagnostics) {
+      for (const passKey of ["pass1", "pass2"]) {
+        const pd = pair.diagnostics[passKey]
+        if (!pd) continue
+        judgeTotalPasses++
+        judgeEmptyResponseRetries += pd.emptyResponseRetries ?? 0
+        judgeFormatRetries += pd.formatRetries ?? 0
+        for (const a of pd.attempts ?? []) {
+          if (a.finishReason === "length") judgeLengthTruncatedAttempts++
+        }
+      }
+    }
+  }
 
   for (const axis of EVAL_AXES) {
     let aWins = 0
@@ -236,11 +315,22 @@ export function summarizePairJudgments(pairResults, opts = {}) {
     let ties = 0
     let positionSensitiveTies = 0
     for (const pair of pairResults) {
-      const outcome = pair.axes[axis]?.outcome
+      const axisEntry = pair.axes[axis]
+      const outcome = axisEntry?.outcome
       if (outcome === "A") aWins++
       else if (outcome === "B") bWins++
       else if (outcome === "tie") ties++
       else positionSensitiveTies++
+
+      // 各パスの先出し（X）勝率を集計（位置バイアス可視化用）
+      for (const passKey of ["pass1", "pass2"]) {
+        const w = axisEntry?.[passKey]?.winner
+        if (w === undefined || w === null) continue
+        const norm = String(w).trim().toUpperCase()
+        if (norm === "X") firstPositionWins++
+        else if (norm === "Y") secondPositionWins++
+        else tiePassVotes++
+      }
     }
     const decided = aWins + bWins
     const decidedRate = totalPairs > 0 ? Number((decided / totalPairs).toFixed(3)) : 0
@@ -273,11 +363,27 @@ export function summarizePairJudgments(pairResults, opts = {}) {
     simplifyCombinedFalseRejectRate = Number((1 - (1 - pTone) * (1 - pOverall)).toFixed(4))
   }
 
+  const nonTiePassVotes = firstPositionWins + secondPositionWins
+  const positionBias = {
+    firstPositionWins,
+    secondPositionWins,
+    tiePassVotes,
+    nonTiePassVotes,
+    firstPositionWinRate: nonTiePassVotes > 0 ? Number((firstPositionWins / nonTiePassVotes).toFixed(3)) : null,
+  }
+
   return {
     totalPairs,
     requiredWinsForImprove,
     requiredWinsForReject,
     simplifyCombinedFalseRejectRate,
+    positionBias,
+    judgeDiagnostics: {
+      totalPasses: judgeTotalPasses,
+      emptyResponseRetries: judgeEmptyResponseRetries,
+      formatRetries: judgeFormatRetries,
+      lengthTruncatedAttempts: judgeLengthTruncatedAttempts,
+    },
     byAxis,
   }
 }
@@ -306,11 +412,30 @@ export function checkRunCompatibility(metaA, metaB) {
   if (Boolean(metaA?.dryRun) !== Boolean(metaB?.dryRun)) {
     warnings.push(`dryRun 条件が異なります（A: ${Boolean(metaA?.dryRun)} / B: ${Boolean(metaB?.dryRun)}）`)
   }
-  if (metaA?.writerTemperature !== metaB?.writerTemperature) {
+  const sameWriterTemp = metaA?.writerTemperature === metaB?.writerTemperature
+  if (!sameWriterTemp) {
     warnings.push(`書き手 temperature が異なります（A: ${metaA?.writerTemperature} / B: ${metaB?.writerTemperature}）`)
   }
-  if (JSON.stringify(metaA?.writerExtraBody ?? {}) !== JSON.stringify(metaB?.writerExtraBody ?? {})) {
+  const sameWriterMaxTokens = (metaA?.writerMaxTokens ?? null) === (metaB?.writerMaxTokens ?? null)
+  if (!sameWriterMaxTokens) {
+    warnings.push(
+      `書き手 maxTokens が異なります（A: ${metaA?.writerMaxTokens ?? "未指定"} / B: ${metaB?.writerMaxTokens ?? "未指定"}）`,
+    )
+  }
+  const sameWriterExtraBody =
+    JSON.stringify(metaA?.writerExtraBody ?? {}) === JSON.stringify(metaB?.writerExtraBody ?? {})
+  if (!sameWriterExtraBody) {
     warnings.push("書き手 extraBody の指定が異なります")
+  }
+  const sameWriterBaseUrl = (metaA?.writerBaseUrl ?? null) === (metaB?.writerBaseUrl ?? null)
+  if (!sameWriterBaseUrl) {
+    warnings.push(`書き手 baseUrl が異なります（A: ${metaA?.writerBaseUrl ?? "未指定"} / B: ${metaB?.writerBaseUrl ?? "未指定"}）`)
+  }
+  const sameWriterTimeout = (metaA?.writerTimeoutMs ?? null) === (metaB?.writerTimeoutMs ?? null)
+  if (!sameWriterTimeout) {
+    warnings.push(
+      `書き手 timeoutMs が異なります（A: ${metaA?.writerTimeoutMs ?? "未指定"} / B: ${metaB?.writerTimeoutMs ?? "未指定"}）`,
+    )
   }
 
   const sameExamples = JSON.stringify(metaA?.examples ?? []) === JSON.stringify(metaB?.examples ?? [])
@@ -328,15 +453,27 @@ export function checkRunCompatibility(metaA, metaB) {
   if ((metaA?.runs ?? 0) !== (metaB?.runs ?? 0)) {
     warnings.push(`試行数が異なります（A: ${metaA?.runs} / B: ${metaB?.runs}）。完了済み一致試行のみでペアリングします`)
   }
-  if (metaA?.writerModel !== metaB?.writerModel) {
+  const sameWriterModel = metaA?.writerModel === metaB?.writerModel
+  if (!sameWriterModel) {
     warnings.push(`書き手モデル指定が異なります（A: ${metaA?.writerModel} / B: ${metaB?.writerModel}）`)
   }
 
   const respA = [...new Set(metaA?.budget?.responseModels ?? [])].sort()
   const respB = [...new Set(metaB?.budget?.responseModels ?? [])].sort()
-  if (respA.length > 0 && respB.length > 0 && JSON.stringify(respA) !== JSON.stringify(respB)) {
+  const sameResponseModels =
+    respA.length === 0 || respB.length === 0 || JSON.stringify(respA) === JSON.stringify(respB)
+  if (!sameResponseModels) {
     warnings.push(`API 応答の解決モデルが異なります（A: ${respA.join(",")} / B: ${respB.join(",")}）`)
   }
+
+  const sameWriterConfig =
+    sameWriterModel &&
+    sameResponseModels &&
+    sameWriterBaseUrl &&
+    sameWriterTemp &&
+    sameWriterMaxTokens &&
+    sameWriterExtraBody &&
+    sameWriterTimeout
 
   const hasCommits = Boolean(metaA?.git?.commit && metaB?.git?.commit)
   const sameCommit = hasCommits && metaA.git.commit === metaB.git.commit
@@ -362,21 +499,32 @@ export function checkRunCompatibility(metaA, metaB) {
   }
   if (sameCommit && sameVariant && artifactsComparable && (!sameDist || !sameSkills)) {
     warnings.push(
-      `同一コミット・同一スキル変種の A/A 条件ですが、dist/ または skills/ の指紋が異なっています（未コミット変更またはビルド差分の混入を確認してください）`,
+      `同一コミット・同一スキル変種の比較ですが、dist/ または skills/ の指紋が異なっています（未コミット変更またはビルド差分の混入を確認してください）`,
     )
   }
 
   const hashesA = JSON.stringify(metaA?.systemPromptHashes ?? {})
   const hashesB = JSON.stringify(metaB?.systemPromptHashes ?? {})
+  let comparisonType = "ab_comparison"
   if (sameCommit && sameVariant && hashesA === hashesB && sameArtifacts) {
-    notes.push("同一コミット・同一スキル条件・同一成果物指紋・同一システムプロンプトハッシュのため、A/A テスト条件として比較しています")
+    if (sameWriterConfig) {
+      comparisonType = "aa_test"
+      notes.push(
+        "同一コミット・同一スキル条件・同一成果物指紋・同一システムプロンプトハッシュ・同一書き手設定のため、A/A テスト条件として比較しています",
+      )
+    } else {
+      comparisonType = "model_or_config_comparison"
+      notes.push(
+        "同一コード・同一スキル条件ですが書き手モデルまたは生成設定が異なるため、モデル／設定比較として集計しています（プラグイン採否基準の直接適用対象外・参考表示）",
+      )
+    }
   } else if (hasCommits && !sameCommit && artifactsComparable && !sameDist && sameVariant && hashesA === hashesB) {
     notes.push("システムプロンプトハッシュは同一ですが dist/ の指紋が異なっています（コード側変更の比較として実行しています）")
   } else if (sameVariant && hashesA === hashesB && !(hasCommits && !sameCommit && artifactsComparable && sameDist && sameSkills)) {
     warnings.push("比較する2つの run のシステムプロンプトハッシュが完全に同一です（コード側のみの変更か確認してください）")
   }
 
-  return { warnings, notes }
+  return { warnings, notes, comparisonType, sameWriterConfig }
 }
 
 /** 事前採否基準（improve / simplify）に従って目安判定を算出する */
@@ -408,11 +556,24 @@ export function evaluateDecision({
       `記録警告 ⚠️ が増加（A: ${overallMetricsA.statusWarningsTotal}件 → B: ${overallMetricsB.statusWarningsTotal}件）`,
     )
   }
-  if (overallMetricsB.outOfRangeChaptersTotal > overallMetricsA.outOfRangeChaptersTotal) {
-    mechanicalRegression = true
-    reasons.push(
-      `文字数目安（±15%）逸脱話数が増加（A: ${overallMetricsA.outOfRangeChaptersTotal}話 → B: ${overallMetricsB.outOfRangeChaptersTotal}話）`,
-    )
+
+  // 文字数判定は範囲外件数の厳密比較ではなく、書けた話の文字数ズレ（絶対値平均）が A より +8pt 以上悪化したかで判定する
+  const wordDevA =
+    overallMetricsA.meanAbsWordDeviationPctWrittenAvg !== undefined
+      ? overallMetricsA.meanAbsWordDeviationPctWrittenAvg
+      : overallMetricsA.meanAbsWordDeviationPctAvg
+  const wordDevB =
+    overallMetricsB.meanAbsWordDeviationPctWrittenAvg !== undefined
+      ? overallMetricsB.meanAbsWordDeviationPctWrittenAvg
+      : overallMetricsB.meanAbsWordDeviationPctAvg
+  if (Number.isFinite(wordDevA) && Number.isFinite(wordDevB)) {
+    const wordDevDeltaPt = Number((wordDevB - wordDevA).toFixed(1))
+    if (wordDevDeltaPt >= WORD_DEVIATION_REGRESSION_TOLERANCE_PT) {
+      mechanicalRegression = true
+      reasons.push(
+        `書けた話の文字数ズレ（絶対値平均）が +${WORD_DEVIATION_REGRESSION_TOLERANCE_PT}pt 以上悪化（A: ${wordDevA.toFixed(1)}% → B: ${wordDevB.toFixed(1)}% / 差 +${wordDevDeltaPt.toFixed(1)}pt）`,
+      )
+    }
   }
 
   const toneAxis = pairSummary.byAxis.tone_and_ng
@@ -508,12 +669,16 @@ function fmtStyleCell(absVal, signedVal, digits, scale = 1, suffix = "") {
   return `${absText} (平均 ${fmtSigned(signedVal * scale, digits, suffix)})`
 }
 
+function fmtPctOrNa(val) {
+  return Number.isFinite(val) ? `${val.toFixed(1)}%` : "n/a"
+}
+
 function formatRunMetaLine(tag, meta) {
   const fp = meta.artifacts
     ? ` / dist=${meta.artifacts.distHash?.slice(0, 12) ?? "n/a"} / skills=${meta.artifacts.skillsHash?.slice(0, 12) ?? "n/a"}`
     : ""
   const st = meta.executionStats
-    ? ` / 話内訳(ok=${stStr(meta.executionStats.okChapters)}, partial=${stStr(meta.executionStats.partialRecordErrorChapters)}, fail=${stStr(meta.executionStats.failedChapters)}, retry[w=${stStr(meta.executionStats.writerRetries)},r=${stStr(meta.executionStats.recordRetries)},api=${stStr(meta.executionStats.transientApiRetries)}])`
+    ? ` / 話内訳(ok=${stStr(meta.executionStats.okChapters)}, partial=${stStr(meta.executionStats.partialRecordErrorChapters)}, fail=${stStr(meta.executionStats.failedChapters)}, retry[fmt=${stStr(meta.executionStats.writerFormatRetries ?? meta.executionStats.writerRetries)},empty=${stStr(meta.executionStats.emptyResponseRetries)},r=${stStr(meta.executionStats.recordRetries)},api=${stStr(meta.executionStats.transientApiRetries)}])`
     : ""
   return `- **${tag} (${meta.label})**: commit=${meta.git?.shortCommit ?? "unknown"}${meta.git?.dirty ? " (dirty)" : ""}${fp} / skillVariant=${meta.skillVariant} / writer=${meta.writerModel} (応答: ${(meta.budget?.responseModels ?? []).join(", ") || "n/a"}) / runs=${meta.runs}${st}`
 }
@@ -529,15 +694,22 @@ export function formatComparisonMarkdown({
   compatibility,
   overallMetricsA,
   overallMetricsB,
+  byExampleMetricsA = null,
+  byExampleMetricsB = null,
   pairSummary,
   decision,
   pairResults,
   judgeBudget,
 }) {
-  const judgeRetryNote =
-    (judgeBudget.transientRetries ?? 0) > 0 || (judgeBudget.failedCalls ?? 0) > 0
-      ? ` (一時障害再試行=${judgeBudget.transientRetries ?? 0}, 失敗呼出=${judgeBudget.failedCalls ?? 0})`
-      : ""
+  const jd = pairSummary.judgeDiagnostics
+  const judgeRetryParts = []
+  if ((jd?.formatRetries ?? 0) > 0) judgeRetryParts.push(`JSON再試行=${jd.formatRetries}`)
+  if ((jd?.emptyResponseRetries ?? 0) > 0) judgeRetryParts.push(`空応答再試行=${jd.emptyResponseRetries}`)
+  if ((jd?.lengthTruncatedAttempts ?? 0) > 0) judgeRetryParts.push(`length打切=${jd.lengthTruncatedAttempts}`)
+  if ((judgeBudget.transientRetries ?? 0) > 0) judgeRetryParts.push(`一時障害再試行=${judgeBudget.transientRetries}`)
+  if ((judgeBudget.failedCalls ?? 0) > 0) judgeRetryParts.push(`失敗呼出=${judgeBudget.failedCalls}`)
+  const judgeRetryNote = judgeRetryParts.length > 0 ? ` (${judgeRetryParts.join(", ")})` : ""
+
   const lines = [
     `# 評価比較レポート: A (${metaA.label}) vs B (${metaB.label})`,
     "",
@@ -548,6 +720,13 @@ export function formatComparisonMarkdown({
     `- **審査コスト**: calls=${judgeBudget.calls}${judgeRetryNote} / totalTokens=${judgeBudget.totalTokens}${judgeBudget.estimatedCostUsd !== null ? ` / estCost=$${judgeBudget.estimatedCostUsd.toFixed(4)}` : ""} / judgeModels=${(judgeBudget.responseModels ?? []).join(", ") || "n/a"}`,
     "",
   ]
+
+  if ((jd?.lengthTruncatedAttempts ?? 0) > 0) {
+    lines.push(
+      `> ⚠️ 審査応答で \`finish_reason=length\` が ${jd.lengthTruncatedAttempts} 回発生しています。\`--judge-max-tokens\` や \`--judge-extra-body\` で推論量・出力上限を見直してください。`,
+      "",
+    )
+  }
 
   if (compatibility.notes.length > 0) {
     lines.push("### 条件メモ")
@@ -582,27 +761,64 @@ export function formatComparisonMarkdown({
     decision.criteria === "improve"
       ? `（主軸: \`${decision.primaryAxis}\`、B 側 75% 以上勝利で採用）`
       : "（非劣性：A 側 75% 以上勝利または機械／密度悪化がなければ採用）"
+  const isModelComparison = compatibility.comparisonType === "model_or_config_comparison"
+  const decisionHeading = isModelComparison
+    ? "## 事前採否基準による参考判定（モデル／生成設定比較のため採否基準の直接適用対象外）"
+    : "## 事前採否基準による目安判定"
+
+  const wordDevWrittenA =
+    overallMetricsA.meanAbsWordDeviationPctWrittenAvg !== undefined
+      ? overallMetricsA.meanAbsWordDeviationPctWrittenAvg
+      : overallMetricsA.meanAbsWordDeviationPctAvg
+  const wordDevWrittenB =
+    overallMetricsB.meanAbsWordDeviationPctWrittenAvg !== undefined
+      ? overallMetricsB.meanAbsWordDeviationPctWrittenAvg
+      : overallMetricsB.meanAbsWordDeviationPctAvg
 
   lines.push(
-    "## 事前採否基準による目安判定",
+    decisionHeading,
     `- **基準種別**: \`${decision.criteria}\`${criteriaDesc}`,
-    `- **判定**: **${decision.verdict}**`,
+    `- **判定**: **${decision.verdict}**${isModelComparison ? "（参考値）" : ""}`,
     ...decision.reasons.map((r) => `- ${r}`),
     "",
-    "## 機械指標の比較（完了済み一致試行の平均）",
+    "## 機械指標の比較（完了済み一致試行の集計）",
     "| 指標 | A | B |",
     "|---|---:|---:|",
     `| 表記 ❌ 合計 | ${overallMetricsA.typographyErrorsTotal} | ${overallMetricsB.typographyErrorsTotal} |`,
     `| 欠落話数合計（執筆・保存失敗） | ${overallMetricsA.missingChaptersTotal ?? 0} | ${overallMetricsB.missingChaptersTotal ?? 0} |`,
     `| 文章 ⚠️ 密度（件/1,000字・合計平均） | ${overallMetricsA.proseWarningsPer1kCharsAvg.toFixed(3)} | ${overallMetricsB.proseWarningsPer1kCharsAvg.toFixed(3)} |`,
     ...proseRuleRows,
-    `| 文字数目安 ±15% 逸脱話数合計 | ${overallMetricsA.outOfRangeChaptersTotal} | ${overallMetricsB.outOfRangeChaptersTotal} |`,
-    `| 文字数ズレ絶対値平均（%） | ${overallMetricsA.meanAbsWordDeviationPctAvg.toFixed(1)}% | ${overallMetricsB.meanAbsWordDeviationPctAvg.toFixed(1)}% |`,
+    `| 書けた話の文字数ズレ絶対値平均（%・判定対象、+${WORD_DEVIATION_REGRESSION_TOLERANCE_PT}pt未満許容） | ${fmtPctOrNa(wordDevWrittenA)} | ${fmtPctOrNa(wordDevWrittenB)} |`,
+    `| 全話の文字数ズレ絶対値平均（%・欠落=100%含む参考） | ${overallMetricsA.meanAbsWordDeviationPctAvg.toFixed(1)}% | ${overallMetricsB.meanAbsWordDeviationPctAvg.toFixed(1)}% |`,
+    `| 文字数目安 ±15% 逸脱話数合計（参考表示） | ${overallMetricsA.outOfRangeChaptersTotal} | ${overallMetricsB.outOfRangeChaptersTotal} |`,
     `| 記録警告 ⚠️ 合計 | ${overallMetricsA.statusWarningsTotal} | ${overallMetricsB.statusWarningsTotal} |`,
     ...styleRows,
+  )
+
+  // 作品別の文体見本ズレ（作品間で符号が逆の過去形比率などが打ち消し合わないよう個別表示）
+  if (byExampleMetricsA && byExampleMetricsB) {
+    const exNames = Object.keys(byExampleMetricsA).filter((ex) => byExampleMetricsB[ex])
+    const exStyleRows = []
+    for (const ex of exNames) {
+      const sA = byExampleMetricsA[ex]?.styleDriftAvg
+      const sB = byExampleMetricsB[ex]?.styleDriftAvg
+      if (!sA || !sB) continue
+      exStyleRows.push(
+        `| ${ex}：1文平均（字） | ${fmtStyleCell(sA.meanSentenceCharsAbsDelta, sA.signed?.meanSentenceCharsDelta, 1)} | ${fmtStyleCell(sB.meanSentenceCharsAbsDelta, sB.signed?.meanSentenceCharsDelta, 1)} |`,
+        `| ${ex}：会話文字比率（pt） | ${fmtStyleCell(sA.dialogueCharRatioAbsDelta, sA.signed?.dialogueCharRatioDelta, 1, 100, "pt")} | ${fmtStyleCell(sB.dialogueCharRatioAbsDelta, sB.signed?.dialogueCharRatioDelta, 1, 100, "pt")} |`,
+        `| ${ex}：段落平均文数 | ${fmtStyleCell(sA.meanParagraphSentencesAbsDelta, sA.signed?.meanParagraphSentencesDelta, 2)} | ${fmtStyleCell(sB.meanParagraphSentencesAbsDelta, sB.signed?.meanParagraphSentencesDelta, 2)} |`,
+        `| ${ex}：過去形(た/だ)比率（pt） | ${fmtStyleCell(sA.pastTaRatioAbsDelta, sA.signed?.pastTaRatioDelta, 1, 100, "pt")} | ${fmtStyleCell(sB.pastTaRatioAbsDelta, sB.signed?.pastTaRatioDelta, 1, 100, "pt")} |`,
+      )
+    }
+    if (exStyleRows.length > 0) {
+      lines.push("", "### 作品別の文体見本ズレ（絶対値平均・括弧内は符号付き平均）", "| 作品・指標 | A | B |", "|---|---:|---:|", ...exStyleRows)
+    }
+  }
+
+  lines.push(
     "",
     "## LLM ペア比較（位置スワップ2回一致で確定）",
-    "| 軸 | A勝 | B勝 | 合意分 | 位置依存分 | 確定率 d | 単軸誤判定目安 (75%基準) |",
+    "| 軸 | A勝 | B勝 | 合意分 | 位置依存分 | 確定率 d | 単軸誤判定目安 (75%基準・ペア審査分のみ) |",
     "|---|---:|---:|---:|---:|---:|---:|",
   )
 
@@ -616,11 +832,20 @@ export function formatComparisonMarkdown({
     )
   }
 
+  lines.push("")
+  const pb = pairSummary.positionBias
+  if (pb && pb.nonTiePassVotes > 0) {
+    lines.push(
+      `- **位置バイアス参考（先出し X 勝率）**: **${pb.firstPositionWins}/${pb.nonTiePassVotes} (${(pb.firstPositionWinRate * 100).toFixed(1)}%)**（引き分けパス: ${pb.tiePassVotes}件。位置スワップで誤勝ちは相殺されるが、偏りが強いと確定率 d と感度が下がります）`,
+    )
+  }
+
   if (decision.criteria === "simplify" && pairSummary.simplifyCombinedFalseRejectRate !== null) {
     lines.push(
-      "",
-      `- **\`simplify\` 2軸（\`tone_and_ng\` または \`overall\`）合算の誤却下確率上限目安**: **${(pairSummary.simplifyCombinedFalseRejectRate * 100).toFixed(1)}%**（独立近似／却下基準: A 側 ${pairSummary.requiredWinsForReject}勝以上 / ${pairSummary.totalPairs}ペア）`,
+      `- **\`simplify\` 2軸（\`tone_and_ng\` または \`overall\`）合算の誤却下確率上限目安（ペア審査分のみ）**: **${(pairSummary.simplifyCombinedFalseRejectRate * 100).toFixed(1)}%**（独立近似／却下基準: A 側 ${pairSummary.requiredWinsForReject}勝以上 / ${pairSummary.totalPairs}ペア。機械指標の揺れは含みません）`,
     )
+  } else {
+    lines.push("- ※上記の誤判定確率目安はペア審査分のみであり、機械指標の揺れは含みません。")
   }
 
   if (highFpAxes.length > 0) {
@@ -667,11 +892,13 @@ export function createDryRunJudgeClient({ prefer = "tie" } = {}) {
       payload[axis] = { winner, reason: `dry-run (${prefer})` }
     }
     const content = JSON.stringify(payload)
-    budget?.record({ label, promptTokens: 400, completionTokens: 120, totalTokens: 520, model })
+    budget?.record({ label, promptTokens: 400, completionTokens: 120, totalTokens: 520, model, finishReason: "stop" })
     return {
       content,
       model,
-      usage: { promptTokens: 400, completionTokens: 120, totalTokens: 520 },
+      finishReason: "stop",
+      reasoningChars: 0,
+      usage: { promptTokens: 400, completionTokens: 120, totalTokens: 520, reasoningTokens: null },
       raw: { dryRun: true },
     }
   }

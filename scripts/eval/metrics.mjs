@@ -68,8 +68,10 @@ export async function collectProjectMetrics(projectDir, chapters = [1, 2, 3]) {
   let typographyWarnings = 0
   let proseWarningsSingle = 0
   let missingChapters = 0
+  let writtenChapters = 0
   let outOfRangeChapters = 0
   let sumAbsWordDeviationPct = 0
+  let sumAbsWordDeviationPctWritten = 0
   const proseByRule = Object.fromEntries(PROSE_METRIC_RULES.map((r) => [r, 0]))
   const typographyByRule = {}
 
@@ -115,8 +117,10 @@ export async function collectProjectMetrics(projectDir, chapters = [1, 2, 3]) {
     typographyErrors += chTypoErrors
     typographyWarnings += chTypoWarnings
     proseWarningsSingle += proseIssues.length
+    writtenChapters++
     if (!withinTolerance) outOfRangeChapters++
     sumAbsWordDeviationPct += Math.abs(deviationPct)
+    sumAbsWordDeviationPctWritten += Math.abs(deviationPct)
 
     chapterTexts.push({ label: `第${ch}話`, text: raw })
     chapterMetrics.push({
@@ -142,6 +146,8 @@ export async function collectProjectMetrics(projectDir, chapters = [1, 2, 3]) {
   )
   const meanAbsWordDeviationPct =
     chapters.length > 0 ? Number((sumAbsWordDeviationPct / chapters.length).toFixed(1)) : 0
+  const meanAbsWordDeviationPctWritten =
+    writtenChapters > 0 ? Number((sumAbsWordDeviationPctWritten / writtenChapters).toFixed(1)) : null
 
   // 文体見本との比較（全対象話を連結して比較）
   const conceptPath = join(projectDir, ".novel", "concept.md")
@@ -167,7 +173,9 @@ export async function collectProjectMetrics(projectDir, chapters = [1, 2, 3]) {
     chapters: chapterMetrics,
     totalBodyChars,
     targetPerChapter,
+    writtenChapters,
     meanAbsWordDeviationPct,
+    meanAbsWordDeviationPctWritten,
     missingChapters,
     outOfRangeChapters,
     typographyErrors,
@@ -197,7 +205,9 @@ export function aggregateRunsMetrics(runMetricsList) {
     return {
       runCount: 0,
       totalBodyCharsAvg: 0,
+      writtenChaptersTotal: 0,
       meanAbsWordDeviationPctAvg: 0,
+      meanAbsWordDeviationPctWrittenAvg: null,
       missingChaptersTotal: 0,
       outOfRangeChaptersTotal: 0,
       outOfRangeChaptersAvg: 0,
@@ -213,6 +223,26 @@ export function aggregateRunsMetrics(runMetricsList) {
       styleDriftAvg: null,
     }
   }
+
+  // 書けた話の文字数ズレ平均は、run ごとの平均の再平均ではなく全試行の「書けた話」をすべてまとめて算出する
+  // （run ごとに書けた話数が異なっても重みが偏らないようにするため）
+  let writtenChaptersTotal = 0
+  let sumAbsWordDevWritten = 0
+  for (const m of runMetricsList) {
+    if (Array.isArray(m.chapters)) {
+      for (const ch of m.chapters) {
+        if (!ch.missing && Number.isFinite(ch.deviationPct)) {
+          writtenChaptersTotal++
+          sumAbsWordDevWritten += Math.abs(ch.deviationPct)
+        }
+      }
+    } else if (Number.isFinite(m.writtenChapters) && Number.isFinite(m.meanAbsWordDeviationPctWritten)) {
+      writtenChaptersTotal += m.writtenChapters
+      sumAbsWordDevWritten += m.meanAbsWordDeviationPctWritten * m.writtenChapters
+    }
+  }
+  const meanAbsWordDeviationPctWrittenAvg =
+    writtenChaptersTotal > 0 ? Number((sumAbsWordDevWritten / writtenChaptersTotal).toFixed(1)) : null
 
   const densities = runMetricsList.map((m) => m.proseWarningsPer1kChars)
   const proseByRulePer1kCharsAvg = Object.fromEntries(
@@ -245,7 +275,9 @@ export function aggregateRunsMetrics(runMetricsList) {
   return {
     runCount: runMetricsList.length,
     totalBodyCharsAvg: Math.round(avg(runMetricsList.map((m) => m.totalBodyChars))),
+    writtenChaptersTotal,
     meanAbsWordDeviationPctAvg: Number(avg(runMetricsList.map((m) => m.meanAbsWordDeviationPct)).toFixed(1)),
+    meanAbsWordDeviationPctWrittenAvg,
     missingChaptersTotal: runMetricsList.reduce((s, m) => s + (m.missingChapters ?? 0), 0),
     outOfRangeChaptersTotal: runMetricsList.reduce((s, m) => s + m.outOfRangeChapters, 0),
     outOfRangeChaptersAvg: Number(avg(runMetricsList.map((m) => m.outOfRangeChapters)).toFixed(2)),

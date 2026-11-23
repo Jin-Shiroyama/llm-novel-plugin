@@ -182,7 +182,7 @@ function formatRunSummaryMarkdown(meta, summary) {
     : "n/a"
   const st = meta.executionStats
   const statsLine = st
-    ? `- **実行内訳**: 成功=${st.okChapters}話 / 記録一部失敗=${st.partialRecordErrorChapters}話 / 執筆・保存失敗=${st.failedChapters}話 / 外部中断=${st.abortedRuns ?? 0}試行（再試行: 執筆=${st.writerRetries}, 記録=${st.recordRetries}, API一時障害=${st.transientApiRetries}）`
+    ? `- **実行内訳**: 成功=${st.okChapters}話 / 記録一部失敗=${st.partialRecordErrorChapters}話 / 執筆・保存失敗=${st.failedChapters}話 / 外部中断=${st.abortedRuns ?? 0}試行（再試行: 執筆形式=${st.writerFormatRetries ?? st.writerRetries}, 空応答=${st.emptyResponseRetries ?? 0}, 記録=${st.recordRetries}, API一時障害=${st.transientApiRetries}${(st.lengthTruncatedAttempts ?? 0) > 0 ? `, length打切=${st.lengthTruncatedAttempts}` : ""}）`
     : null
   const incompleteSummary = Object.entries(meta.incompleteRuns ?? {})
     .flatMap(([ex, items]) => items.map((it) => `${ex}#run-${it.run}(${it.reason})`))
@@ -199,6 +199,11 @@ function formatRunSummaryMarkdown(meta, summary) {
     `- **API使用量**: calls=${meta.budget.calls}/${meta.budget.maxCalls}, tokens=${meta.budget.totalTokens}${meta.budget.estimatedCostUsd !== null ? `, estCost=$${meta.budget.estimatedCostUsd.toFixed(4)}` : ""}`,
     ...(statsLine ? [statsLine] : []),
   ]
+  if ((st?.lengthTruncatedAttempts ?? 0) > 0) {
+    lines.push(
+      `- **⚠️ 出力上限打切り**: \`finish_reason=length\` による空応答が ${st.lengthTruncatedAttempts} 回発生しました。\`--writer-max-tokens\` や \`--writer-extra-body\` で推論量・出力上限の設定を見直してください。`,
+    )
+  }
   if (meta.stoppedByBudget) {
     lines.push(`- **⚠️ 予算上限停止**: ${meta.budgetStopReason}`)
   }
@@ -211,8 +216,8 @@ function formatRunSummaryMarkdown(meta, summary) {
   lines.push(
     "",
     "## 機械指標サマリー（外部中断を除いた試行を集計）",
-    "| 作品 | 試行 | 欠落話数 | 表記❌合計 | 文章⚠️密度(/1k字) | stock-phrase(/1k字) | 文字数逸脱 | 記録⚠️合計 | 文体絶対値ズレ(1文平均/会話比) |",
-    "|---|---:|---:|---:|---:|---:|---:|---:|---|",
+    "| 作品 | 試行 | 欠落話数 | 表記❌合計 | 文章⚠️密度(/1k字) | stock-phrase(/1k字) | 書けた話ズレ平均 | 文字数逸脱(参考) | 記録⚠️合計 | 文体絶対値ズレ(1文平均/会話比) |",
+    "|---|---:|---:|---:|---:|---:|---:|---:|---:|---|",
   )
   const formatStyleCell = (drift) => {
     if (!drift) return "n/a"
@@ -220,17 +225,21 @@ function formatRunSummaryMarkdown(meta, summary) {
     const d = `${(drift.dialogueCharRatioAbsDelta * 100).toFixed(1)}pt`
     return `${s} / ${d}`
   }
+  const fmtWrittenDev = (agg) =>
+    Number.isFinite(agg.meanAbsWordDeviationPctWrittenAvg)
+      ? `${agg.meanAbsWordDeviationPctWrittenAvg.toFixed(1)}%`
+      : "n/a"
   for (const [ex, data] of Object.entries(summary.byExample)) {
     const agg = data.aggregate
     const stock = agg.proseByRulePer1kCharsAvg?.["stock-phrase"] ?? 0
     lines.push(
-      `| ${ex} | ${agg.runCount}/${meta.runs} | ${agg.missingChaptersTotal ?? 0} | ${agg.typographyErrorsTotal} | ${agg.proseWarningsPer1kCharsAvg.toFixed(3)} | ${stock.toFixed(3)} | ${agg.outOfRangeChaptersTotal} | ${agg.statusWarningsTotal} | ${formatStyleCell(agg.styleDriftAvg)} |`,
+      `| ${ex} | ${agg.runCount}/${meta.runs} | ${agg.missingChaptersTotal ?? 0} | ${agg.typographyErrorsTotal} | ${agg.proseWarningsPer1kCharsAvg.toFixed(3)} | ${stock.toFixed(3)} | ${fmtWrittenDev(agg)} | ${agg.outOfRangeChaptersTotal} | ${agg.statusWarningsTotal} | ${formatStyleCell(agg.styleDriftAvg)} |`,
     )
   }
   const ov = summary.overall
   const ovStock = ov.proseByRulePer1kCharsAvg?.["stock-phrase"] ?? 0
   lines.push(
-    `| **全体** | **${ov.runCount}** | **${ov.missingChaptersTotal ?? 0}** | **${ov.typographyErrorsTotal}** | **${ov.proseWarningsPer1kCharsAvg.toFixed(3)}** | **${ovStock.toFixed(3)}** | **${ov.outOfRangeChaptersTotal}** | **${ov.statusWarningsTotal}** | **${formatStyleCell(ov.styleDriftAvg)}** |`,
+    `| **全体** | **${ov.runCount}** | **${ov.missingChaptersTotal ?? 0}** | **${ov.typographyErrorsTotal}** | **${ov.proseWarningsPer1kCharsAvg.toFixed(3)}** | **${ovStock.toFixed(3)}** | **${fmtWrittenDev(ov)}** | **${ov.outOfRangeChaptersTotal}** | **${ov.statusWarningsTotal}** | **${formatStyleCell(ov.styleDriftAvg)}** |`,
     "",
   )
   return lines.join("\n")
@@ -306,7 +315,10 @@ export async function runCommand(flags, deps = {}) {
     failedChapters: 0,
     abortedRuns: 0,
     writerRetries: 0,
+    writerFormatRetries: 0,
+    emptyResponseRetries: 0,
     recordRetries: 0,
+    lengthTruncatedAttempts: 0,
     transientApiRetries: 0,
     failedApiCalls: 0,
   }
@@ -362,7 +374,10 @@ export async function runCommand(flags, deps = {}) {
           })
           chapterLogs.push(step)
           executionStats.writerRetries += step.writerRetries ?? 0
+          executionStats.writerFormatRetries += step.writerFormatRetries ?? 0
+          executionStats.emptyResponseRetries += (step.emptyResponseRetries ?? 0) + (step.recordEmptyResponseRetries ?? 0)
           executionStats.recordRetries += step.recordRetries ?? 0
+          executionStats.lengthTruncatedAttempts += step.lengthTruncatedAttempts ?? 0
           if (step.systemPromptHash && !systemPromptHashes[ex]) {
             systemPromptHashes[ex] = step.systemPromptHash
           }
@@ -581,6 +596,8 @@ export async function compareCommand(dirAPath, dirBPath, flags, deps = {}) {
 
   const metricsListA = []
   const metricsListB = []
+  const metricsListByExA = Object.fromEntries(commonExamples.map((ex) => [ex, []]))
+  const metricsListByExB = Object.fromEntries(commonExamples.map((ex) => [ex, []]))
   const pairResults = []
   const callLlm =
     deps.callLlm ?? (dryRun ? createDryRunJudgeClient({ prefer: flags["dry-run-prefer"] ?? "tie" }) : undefined)
@@ -616,6 +633,8 @@ export async function compareCommand(dirAPath, dirBPath, flags, deps = {}) {
         })
         metricsListA.push(mA)
         metricsListB.push(mB)
+        metricsListByExA[ex].push(mA)
+        metricsListByExB[ex].push(mB)
         pairResults.push(judged)
       }
     }
@@ -633,6 +652,12 @@ export async function compareCommand(dirAPath, dirBPath, flags, deps = {}) {
 
   const overallMetricsA = aggregateRunsMetrics(metricsListA)
   const overallMetricsB = aggregateRunsMetrics(metricsListB)
+  const byExampleMetricsA = Object.fromEntries(
+    commonExamples.map((ex) => [ex, aggregateRunsMetrics(metricsListByExA[ex])]),
+  )
+  const byExampleMetricsB = Object.fromEntries(
+    commonExamples.map((ex) => [ex, aggregateRunsMetrics(metricsListByExB[ex])]),
+  )
   const pairSummary = summarizePairJudgments(pairResults)
   const compatibility = checkRunCompatibility(metaA, metaB)
   for (const w of excludedPairWarnings) compatibility.warnings.push(w)
@@ -665,6 +690,8 @@ export async function compareCommand(dirAPath, dirBPath, flags, deps = {}) {
     compatibility,
     overallMetricsA,
     overallMetricsB,
+    byExampleMetricsA,
+    byExampleMetricsB,
     pairSummary,
     decision,
     pairResults,
